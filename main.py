@@ -3,8 +3,6 @@ import json
 import threading
 from pathlib import Path
 from datetime import datetime
-import smtplib
-from email.message import EmailMessage
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -21,9 +19,6 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.screenmanager import ScreenManager, Screen
-
-from openpyxl import load_workbook, Workbook
-from openpyxl.styles import Border, Side, Font, Alignment
 
 APP_TITLE = "Paski Future 6.1 STABLE PREMIUM"
 CONFIG_FILE = "smtp_config.json"
@@ -47,6 +42,7 @@ class SMTPScreen(Screen):
 
 
 class PremiumButton(Button):
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.background_normal = ""
@@ -125,13 +121,9 @@ class PaskiFutureApp(App):
         smtp_btn = PremiumButton(text="⚙ Konfiguracja SMTP")
         smtp_btn.bind(on_press=lambda x: setattr(self.sm, "current", "smtp"))
 
-        email_excel_btn = PremiumButton(text="📧 Wybierz Email Excel")
-        email_excel_btn.bind(on_press=self.select_email_excel)
-
         layout.add_widget(title)
         layout.add_widget(open_btn)
         layout.add_widget(load_btn)
-        layout.add_widget(email_excel_btn)
         layout.add_widget(smtp_btn)
         layout.add_widget(self.home_status)
 
@@ -170,7 +162,6 @@ class PaskiFutureApp(App):
         resolver = PythonActivity.mActivity.getContentResolver()
 
         uri = intent.getData()
-
         input_stream = resolver.openInputStream(uri)
 
         local_file = Path(self.user_data_dir) / "selected.xlsx"
@@ -188,7 +179,6 @@ class PaskiFutureApp(App):
         input_stream.close()
 
         self.current_file = local_file
-
         self.home_status.text = "Plik wybrany"
 
     def load_full_excel(self, _):
@@ -196,6 +186,8 @@ class PaskiFutureApp(App):
         if not self.current_file:
             self._popup("Błąd", "Najpierw wybierz plik")
             return
+
+        from openpyxl import load_workbook
 
         wb = load_workbook(str(self.current_file), data_only=True)
 
@@ -221,11 +213,7 @@ class PaskiFutureApp(App):
         top = BoxLayout(size_hint=(1, 0.12), spacing=dp(10))
 
         self.search = TextInput(hint_text="🔎 Wyszukaj...", multiline=False)
-
         self.search.bind(text=self.filter_data)
-
-        folder_btn = PremiumButton(text="📁 Folder")
-        folder_btn.bind(on_press=self.pick_export_folder)
 
         export_btn = PremiumButton(text="📦 Eksport")
         export_btn.bind(
@@ -235,22 +223,16 @@ class PaskiFutureApp(App):
             ).start()
         )
 
-        email_btn = PremiumButton(text="📬 Email")
-        email_btn.bind(on_press=lambda x: setattr(self.sm, "current", "email"))
-
         back_btn = PremiumButton(text="⬅ Powrót")
         back_btn.bind(on_press=lambda x: setattr(self.sm, "current", "home"))
 
         top.add_widget(self.search)
-        top.add_widget(folder_btn)
         top.add_widget(export_btn)
-        top.add_widget(email_btn)
         top.add_widget(back_btn)
 
         self.scroll = ScrollView()
 
         self.grid = GridLayout(size_hint=(None, None), spacing=dp(1))
-
         self.grid.bind(minimum_height=self.grid.setter('height'))
         self.grid.bind(minimum_width=self.grid.setter('width'))
 
@@ -301,141 +283,26 @@ class PaskiFutureApp(App):
 
                 self.grid.add_widget(lbl)
 
-    def _build_email(self):
+    def _export_thread(self):
 
-        layout = BoxLayout(orientation="vertical", padding=dp(30), spacing=dp(20))
-
-        self.email_status = Label(text="Gotowy")
-
-        self.email_progress = ProgressBar(max=100)
-
-        send1 = PremiumButton(text="📧 Wyślij 1 rekord")
-        sendAll = PremiumButton(text="📨 Wyślij hurtowo")
-
-        back = PremiumButton(text="⬅ Powrót")
-
-        send1.bind(
-            on_press=lambda x: threading.Thread(
-                target=self._send_one,
-                daemon=True
-            ).start()
-        )
-
-        sendAll.bind(
-            on_press=lambda x: threading.Thread(
-                target=self._send_all,
-                daemon=True
-            ).start()
-        )
-
-        back.bind(on_press=lambda x: setattr(self.sm, "current", "table"))
-
-        layout.add_widget(send1)
-        layout.add_widget(sendAll)
-        layout.add_widget(self.email_status)
-        layout.add_widget(self.email_progress)
-        layout.add_widget(back)
-
-        self.email.add_widget(layout)
-
-    def _send_one(self):
-
-        if len(self.filtered_data) < 2:
-            self._popup("Błąd", "Brak danych")
-            return
-
-        self._send_email_row(self.filtered_data[1])
-
-    def _send_all(self):
-
-        threading.Thread(
-            target=self._send_all_thread,
-            daemon=True
-        ).start()
-
-    def _send_all_thread(self):
-
-        total = len(self.filtered_data[1:])
-
-        done = 0
-
-        for row in self.filtered_data[1:]:
-
-            self._send_email_row(row)
-
-            done += 1
-
-            percent = int((done / total) * 100)
-
-            Clock.schedule_once(
-                lambda dt, p=percent:
-                setattr(self.email_progress, "value", p)
-            )
-
-    def _send_email_row(self, row):
-
-        if not os.path.exists(CONFIG_FILE):
-            Clock.schedule_once(
-                lambda dt: self._popup("Błąd", "Skonfiguruj SMTP")
-            )
-            return False
-
-        email = self._get_email_for_row(row)
-
-        if not email:
-            return False
-
-        with open(CONFIG_FILE) as f:
-            config = json.load(f)
+        from openpyxl import Workbook
 
         wb = Workbook()
         ws = wb.active
 
-        ws.append(self.full_data[0])
-        ws.append(row)
+        for row in self.filtered_data:
+            ws.append(row)
 
-        file = Path(self.user_data_dir) / "temp.xlsx"
+        file = Path(self.user_data_dir) / f"export_{datetime.now().strftime('%H%M%S')}.xlsx"
 
         wb.save(file)
 
-        msg = EmailMessage()
+        Clock.schedule_once(
+            lambda dt: self._popup("Eksport", f"Zapisano:\n{file}")
+        )
 
-        msg["Subject"] = "Dane"
-        msg["From"] = config["email"]
-        msg["To"] = email
-
-        msg.set_content("W załączniku dane.")
-
-        with open(file, "rb") as f:
-
-            msg.add_attachment(
-                f.read(),
-                maintype="application",
-                subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                filename="dane.xlsx"
-            )
-
-        server = smtplib.SMTP(config["server"], int(config["port"]))
-
-        server.starttls()
-
-        server.login(config["email"], config["password"])
-
-        server.send_message(msg)
-
-        server.quit()
-
-        return True
-
-    def select_email_excel(self, _):
+    def _build_email(self):
         pass
-
-    def _get_email_for_row(self, row):
-
-        name = str(row[0]).strip().lower()
-        surname = str(row[1]).strip().lower()
-
-        return self.email_dict.get(f"{name} {surname}")
 
     def _build_smtp(self):
 
@@ -450,7 +317,6 @@ class PaskiFutureApp(App):
         back = PremiumButton(text="⬅ Powrót")
 
         save.bind(on_press=self.save_smtp)
-
         back.bind(on_press=lambda x: setattr(self.sm, "current", "home"))
 
         layout.add_widget(self.s_server)
@@ -470,10 +336,6 @@ class PaskiFutureApp(App):
             "email": self.s_email.text.strip(),
             "password": self.s_pass.text.strip()
         }
-
-        if not all(config.values()):
-            self._popup("Błąd", "Uzupełnij dane")
-            return
 
         with open(CONFIG_FILE, "w") as f:
             json.dump(config, f)
