@@ -463,28 +463,34 @@ class PaskiFutureApp(App):
             file = Path(self.user_data_dir)/"temp.xlsx"
             wb.save(file)
 
+        try:
             msg = EmailMessage()
             msg["Subject"] = "Dane"
             msg["From"] = config["email"]
             msg["To"] = email
             msg.set_content("W załączniku dane.")
 
-            with open(file, "rb") as f:
-                msg.add_attachment(f.read(), maintype="application",
-                                   subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                   filename="dane.xlsx")
+    # Załącznik
+         with open(file, "rb") as f:
+             msg.add_attachment(f.read(),
+                           maintype="application",
+                           subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           filename="dane.xlsx")
 
-            server = smtplib.SMTP(config["server = smtplib.SMTP(config["server"], int(config["port"]))
-            server.starttls()
-            server.login(config["email"], config["password"])
-            server.send_message(msg)
-            server.quit()
+    # Połączenie SMTP
+    server = smtplib.SMTP(config["server"], int(config["port"]))
+    server.starttls()
+    server.login(config["email"], config["password"])
+    server.send_message(msg)
+    server.quit()
 
-            Clock.schedule_once(lambda dt: setattr(self.email_status, "text", f"Wysłano: {row[0]} {row[1]}"))
-            return True
-        except Exception as e:
-            Clock.schedule_once(lambda dt: self._popup("Błąd wysyłki", str(e)))
-            return False
+    # Aktualizacja statusu w UI
+    Clock.schedule_once(lambda dt: setattr(self.email_status, "text", f"Wysłano: {row[0]} {row[1]}"))
+    return True
+
+except Exception as e:
+    Clock.schedule_once(lambda dt: self._popup("Błąd wysyłki", str(e)))
+    return False
 
     # ---------------------------
     # SMTP Screen
