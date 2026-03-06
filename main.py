@@ -337,8 +337,7 @@ class PaskiFutureApp(App):
         if len(self.filtered_data) < 2:
             return
 
-        documents = self.export_folder or "/storage/emulated/0/Documents/PaskiFuture"
-        os.makedirs(documents, exist_ok=True)
+        self.export_folder = uri.getPath() if uri else None
 
         header = self.full_data[0]
         rows = self.filtered_data[1:]
