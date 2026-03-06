@@ -46,11 +46,11 @@ jobs:
           mv cmdline-tools/* cmdline-tools/latest/ || true
 
           echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-          echo "PATH=$PATH:$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_ENV
+          echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
 
-      # ---- INSTALL SDK PACKAGES ----
+      # ---- INSTALL SDK + NDK ----
 
-      - name: Install Android SDK packages
+      - name: Install Android SDK and NDK
         run: |
           sdkmanager "platform-tools" \
                      "platforms;android-33" \
