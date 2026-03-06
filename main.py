@@ -330,44 +330,88 @@ class PaskiFutureApp(App):
         Clock.schedule_once(lambda dt: self._popup("Sukces", f"Wyeksportowano {done} plików"))
 
     # ---------------------------
-    # Email Excel picker & loader
-    # ---------------------------
-    def select_email_excel(self):
-        if platform != "android":
-            self.home_status.text = "Picker działa tylko Android"
-            return
-        from jnius import autoclass
-        from android import activity
-        PythonActivity = autoclass("org.kivy.android.PythonActivity")
-        Intent = autoclass("android.content.Intent")
-        intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
-        intent.setType("*/*")
-        intent.addCategory(Intent.CATEGORY_OPENABLE)
-        activity.bind(on_activity_result=self._on_email_excel_result)
-        PythonActivity.mActivity.startActivityForResult(intent, 555)
+# Email Excel picker & loader
+# ---------------------------
+def select_email_excel(self):
+    # Sprawdzenie platformy
+    if platform != "android":
+        self._popup("Błąd", "Picker działa tylko na Android")
+        return
 
-    def _on_email_excel_result(self, request_code, result_code, intent):
-        if request_code != 555 or not intent:
-            return
-        from android import activity
-        activity.unbind(on_activity_result=self._on_email_excel_result)
-        from jnius import autoclass
+    from jnius import autoclass
+    from android import activity
+
+    PythonActivity = autoclass("org.kivy.android.PythonActivity")
+    Intent = autoclass("android.content.Intent")
+
+    # Utworzenie intentu do wyboru pliku
+    intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+    intent.setType("*/*")
+    intent.addCategory(Intent.CATEGORY_OPENABLE)
+
+    # Bind do wyników
+    activity.unbind(on_activity_result=self._on_email_excel_result)  # bezpieczeństwo
+    activity.bind(on_activity_result=self._on_email_excel_result)
+
+    # Start wyboru pliku
+    PythonActivity.mActivity.startActivityForResult(intent, 555)
+
+
+def _on_email_excel_result(self, request_code, result_code, intent):
+    from android import activity
+    from jnius import autoclass
+
+    if request_code != 555 or not intent:
+        return
+
+    # Odwiązanie listenera
+    activity.unbind(on_activity_result=self._on_email_excel_result)
+
+    try:
         PythonActivity = autoclass("org.kivy.android.PythonActivity")
         resolver = PythonActivity.mActivity.getContentResolver()
         uri = intent.getData()
-        input_stream = resolver.openInputStream(uri)
+        if not uri:
+            self._popup("Błąd", "Nie wybrano pliku")
+            return
+
+        # Utworzenie lokalnego pliku w katalogu aplikacji
         local_file = Path(self.user_data_dir) / "email_list.xlsx"
-        with open(local_file, "wb") as out:
+        with resolver.openInputStream(uri) as input_stream, open(local_file, "wb") as out:
             buffer = bytearray(4096)
             while True:
                 read = input_stream.read(buffer)
                 if read == -1:
                     break
                 out.write(buffer[:read])
-        input_stream.close()
+
         self.email_file = local_file
         self._popup("Email Excel wybrany", str(local_file))
         self._load_email_file()
+
+    except Exception as e:
+        self._popup("Błąd", f"Nie udało się wczytać pliku: {e}")
+
+
+def _load_email_file(self):
+    if not self.email_file or not self.email_file.exists():
+        return
+    try:
+        wb = load_workbook(str(self.email_file), data_only=True)
+        sheet = wb.active
+        self.email_dict = {}
+        header = [str(c).strip() for c in next(sheet.iter_rows(values_only=True))]
+        name_idx = header.index("Name")
+        surname_idx = header.index("Surname")
+        email_idx = header.index("Email")
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            if not row[name_idx] or not row[surname_idx] or not row[email_idx]:
+                continue
+            key = f"{str(row[name_idx]).strip().lower()} {str(row[surname_idx]).strip().lower()}"
+            self.email_dict[key] = str(row[email_idx]).strip()
+        wb.close()
+    except Exception as e:
+        self._popup("Błąd", f"Błąd wczytywania Excel: {e}")
 
     def _load_email_file(self):
         if not self.email_file:
