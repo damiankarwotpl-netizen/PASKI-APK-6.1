@@ -1,10 +1,7 @@
 import os
 import json
-import smtplib
 import threading
 from pathlib import Path
-from datetime import datetime
-from email.message import EmailMessage
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -21,10 +18,11 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.screenmanager import ScreenManager, Screen
+from kivy.uix.checkbox import CheckBox
 
-APP_TITLE = "Paski Future 8.0 ULTRA"
+
+APP_TITLE = "Paski Future 7.0 ULTRA STABLE"
 CONFIG_FILE = "smtp_config.json"
-EMAIL_COLUMN_INDEX = 3
 
 
 class HomeScreen(Screen): pass
@@ -39,38 +37,36 @@ class PremiumButton(Button):
         super().__init__(**kwargs)
 
         self.background_normal = ""
-        self.background_color = (0.2, 0.4, 0.8, 1)
-
-        self.color = (1, 1, 1, 1)
-
-        self.font_size = 16
-
-        self.size_hint_y = None
-        self.height = dp(48)
+        self.background_color = (0.2,0.4,0.8,1)
+        self.size_hint_y=None
+        self.height=dp(55)
+        self.font_size=16
 
 
 class PaskiFutureApp(App):
 
     def build(self):
 
-        self.title = APP_TITLE
-        Window.clearcolor = (0.08, 0.1, 0.15, 1)
+        Window.clearcolor=(0.08,0.1,0.15,1)
 
-        self.full_data = []
-        self.filtered_data = []
-        self.current_file = None
+        self.full_data=[]
+        self.filtered_data=[]
+        self.current_file=None
 
-        self.sm = ScreenManager()
+        self.export_columns=None
+        self.email_column=0
 
-        self.home = HomeScreen(name="home")
-        self.table = TableScreen(name="table")
-        self.email = EmailScreen(name="email")
-        self.smtp = SMTPScreen(name="smtp")
+        self.sm=ScreenManager()
 
-        self._build_home()
-        self._build_table()
-        self._build_email()
-        self._build_smtp()
+        self.home=HomeScreen(name="home")
+        self.table=TableScreen(name="table")
+        self.email=EmailScreen(name="email")
+        self.smtp=SMTPScreen(name="smtp")
+
+        self.build_home()
+        self.build_table()
+        self.build_email()
+        self.build_smtp()
 
         self.sm.add_widget(self.home)
         self.sm.add_widget(self.table)
@@ -80,197 +76,148 @@ class PaskiFutureApp(App):
         return self.sm
 
 
-# =========================
 # HOME
-# =========================
+    def build_home(self):
 
-    def _build_home(self):
+        layout=BoxLayout(orientation="vertical",padding=dp(30),spacing=dp(20))
 
-        layout = BoxLayout(
-            orientation="vertical",
-            padding=dp(30),
-            spacing=dp(20)
-        )
+        title=Label(text=APP_TITLE,font_size=26)
 
-        title = Label(
-            text=APP_TITLE,
-            font_size=26
-        )
-
-        open_btn = PremiumButton(text="📂 Otwórz Excel")
+        open_btn=PremiumButton(text="📂 Otwórz Excel")
         open_btn.bind(on_press=self.open_excel_picker)
 
-        load_btn = PremiumButton(text="📊 Wczytaj dane")
-        load_btn.bind(on_press=self.load_full_excel)
+        load_btn=PremiumButton(text="📊 Wczytaj dane")
+        load_btn.bind(on_press=self.load_excel)
 
-        smtp_btn = PremiumButton(text="⚙ SMTP")
-        smtp_btn.bind(on_press=lambda x: setattr(self.sm, "current", "smtp"))
-
-        self.home_status = Label(text="Gotowy")
+        smtp_btn=PremiumButton(text="⚙ SMTP")
+        smtp_btn.bind(on_press=lambda x:setattr(self.sm,"current","smtp"))
 
         layout.add_widget(title)
         layout.add_widget(open_btn)
         layout.add_widget(load_btn)
         layout.add_widget(smtp_btn)
-        layout.add_widget(self.home_status)
 
         self.home.add_widget(layout)
 
 
-# =========================
 # PICKER
-# =========================
+    def open_excel_picker(self,_):
 
-    def open_excel_picker(self, _):
-
-        if platform != "android":
-
-            self.home_status.text = "Picker działa tylko Android"
+        if platform!="android":
             return
 
         from jnius import autoclass
         from android import activity
 
-        PythonActivity = autoclass("org.kivy.android.PythonActivity")
-        Intent = autoclass("android.content.Intent")
+        PythonActivity=autoclass("org.kivy.android.PythonActivity")
+        Intent=autoclass("android.content.Intent")
 
-        intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+        intent=Intent(Intent.ACTION_OPEN_DOCUMENT)
         intent.setType("*/*")
-        intent.addCategory(Intent.CATEGORY_OPENABLE)
 
-        activity.bind(on_activity_result=self._on_activity_result)
+        activity.bind(on_activity_result=self.on_file_selected)
 
-        PythonActivity.mActivity.startActivityForResult(intent, 999)
+        PythonActivity.mActivity.startActivityForResult(intent,999)
 
 
-    def _on_activity_result(self, request_code, result_code, intent):
+    def on_file_selected(self,request,result,intent):
 
-        if request_code != 999 or not intent:
+        if request!=999:
             return
 
         from android import activity
-        activity.unbind(on_activity_result=self._on_activity_result)
+        activity.unbind(on_activity_result=self.on_file_selected)
 
         from jnius import autoclass
-        PythonActivity = autoclass("org.kivy.android.PythonActivity")
 
-        resolver = PythonActivity.mActivity.getContentResolver()
-        uri = intent.getData()
+        PythonActivity=autoclass("org.kivy.android.PythonActivity")
 
-        input_stream = resolver.openInputStream(uri)
+        resolver=PythonActivity.mActivity.getContentResolver()
 
-        local_file = Path(self.user_data_dir) / "selected.xlsx"
+        uri=intent.getData()
 
-        with open(local_file, "wb") as output:
+        stream=resolver.openInputStream(uri)
 
-            buffer = bytearray(4096)
+        path=Path(self.user_data_dir)/"excel.xlsx"
 
-            while True:
+        with open(path,"wb") as f:
+            f.write(stream.read())
 
-                bytes_read = input_stream.read(buffer)
-
-                if bytes_read == -1:
-                    break
-
-                output.write(buffer[:bytes_read])
-
-        input_stream.close()
-
-        self.current_file = local_file
-        self.home_status.text = "Plik wybrany"
+        self.current_file=path
 
 
-# =========================
 # LOAD EXCEL
-# =========================
-
-    def load_full_excel(self, _):
+    def load_excel(self,_):
 
         if not self.current_file:
-            self._popup("Błąd", "Najpierw wybierz plik")
             return
 
         from openpyxl import load_workbook
 
-        try:
+        wb=load_workbook(self.current_file,data_only=True)
 
-            wb = load_workbook(str(self.current_file), data_only=True)
-            sheet = wb.active
+        ws=wb.active
 
-            self.full_data = [
-                ["" if v is None else str(v) for v in row]
-                for row in sheet.iter_rows(values_only=True)
-            ]
+        data=[]
 
-            wb.close()
+        for row in ws.iter_rows(values_only=True):
 
-        except Exception as e:
+            data.append(["" if v is None else str(v) for v in row])
 
-            self._popup("Błąd", str(e))
+        wb.close()
+
+        if not data:
             return
 
-        if not self.full_data:
-            self._popup("Błąd", "Plik pusty")
-            return
-
-        self.filtered_data = self.full_data
+        self.full_data=data
+        self.filtered_data=data
 
         self.display_table()
 
-        self.sm.current = "table"
+        self.sm.current="table"
 
 
-# =========================
 # TABLE
-# =========================
+    def build_table(self):
 
-    def _build_table(self):
+        layout=BoxLayout(orientation="vertical")
 
-        layout = BoxLayout(
-            orientation="vertical",
-            padding=dp(10),
-            spacing=dp(10)
-        )
+        top=BoxLayout(size_hint=(1,0.12))
 
-        top = BoxLayout(size_hint=(1, 0.12), spacing=dp(10))
-
-        self.search = TextInput(
-            hint_text="🔎 Szukaj",
-            multiline=False
-        )
-
+        self.search=TextInput(hint_text="Szukaj...",multiline=False)
         self.search.bind(text=self.filter_data)
 
-        export_btn = PremiumButton(text="📦 Eksport")
+        export_btn=PremiumButton(text="📦 Export")
         export_btn.bind(on_press=self.export_files)
 
-        email_btn = PremiumButton(text="📧 Email")
-        email_btn.bind(on_press=lambda x: setattr(self.sm, "current", "email"))
+        choose_cols=PremiumButton(text="☑ Kolumny")
+        choose_cols.bind(on_press=self.choose_export_columns)
 
-        back_btn = PremiumButton(text="⬅")
-        back_btn.bind(on_press=lambda x: setattr(self.sm, "current", "home"))
+        choose_email=PremiumButton(text="📧 Kolumna email")
+        choose_email.bind(on_press=self.choose_email_column)
+
+        email_btn=PremiumButton(text="📬 Email")
+        email_btn.bind(on_press=lambda x:setattr(self.sm,"current","email"))
+
+        back_btn=PremiumButton(text="⬅")
+        back_btn.bind(on_press=lambda x:setattr(self.sm,"current","home"))
 
         top.add_widget(self.search)
         top.add_widget(export_btn)
+        top.add_widget(choose_cols)
+        top.add_widget(choose_email)
         top.add_widget(email_btn)
         top.add_widget(back_btn)
 
-        self.scroll = ScrollView()
+        self.scroll=ScrollView()
 
-        self.grid = GridLayout(
-            size_hint=(None, None),
-            spacing=dp(1)
-        )
-
-        self.grid.bind(minimum_height=self.grid.setter('height'))
-        self.grid.bind(minimum_width=self.grid.setter('width'))
+        self.grid=GridLayout(size_hint=(None,None),spacing=1)
+        self.grid.bind(minimum_height=self.grid.setter("height"))
+        self.grid.bind(minimum_width=self.grid.setter("width"))
 
         self.scroll.add_widget(self.grid)
 
-        self.progress = ProgressBar(
-            max=100,
-            size_hint=(1, 0.05)
-        )
+        self.progress=ProgressBar(max=100,size_hint=(1,0.05))
 
         layout.add_widget(top)
         layout.add_widget(self.scroll)
@@ -279,10 +226,7 @@ class PaskiFutureApp(App):
         self.table.add_widget(layout)
 
 
-# =========================
 # DISPLAY TABLE
-# =========================
-
     def display_table(self):
 
         self.grid.clear_widgets()
@@ -290,128 +234,206 @@ class PaskiFutureApp(App):
         if not self.filtered_data:
             return
 
-        rows = len(self.filtered_data)
-        cols = len(self.filtered_data[0])
+        cols=len(self.filtered_data[0])
 
-        self.grid.cols = cols
+        self.grid.cols=cols
 
         for row in self.filtered_data:
 
             for cell in row:
 
-                lbl = Label(
+                lbl=Label(
                     text=str(cell),
-                    size_hint=(None, None),
-                    size=(dp(160), dp(40))
+                    size_hint=(None,None),
+                    size=(dp(160),dp(40))
                 )
 
                 self.grid.add_widget(lbl)
 
 
-    def filter_data(self, instance, value):
+# FILTER
+    def filter_data(self,instance,value):
 
-        value = value.lower()
+        value=value.lower()
 
-        self.filtered_data = [
+        header=self.full_data[0]
 
-            row for row in self.full_data
+        rows=self.full_data[1:]
 
-            if any(value in str(cell).lower() for cell in row)
+        filtered=[]
 
-        ]
+        for row in rows:
+
+            if any(value in str(cell).lower() for cell in row):
+
+                filtered.append(row)
+
+        self.filtered_data=[header]+filtered
 
         self.display_table()
 
 
-# =========================
+# CHOOSE EXPORT COLUMNS
+    def choose_export_columns(self,_):
+
+        layout=BoxLayout(orientation="vertical")
+
+        self.export_checks=[]
+
+        for i,col in enumerate(self.full_data[0]):
+
+            row=BoxLayout(size_hint_y=None,height=dp(40))
+
+            cb=CheckBox(active=True)
+
+            lbl=Label(text=str(col))
+
+            self.export_checks.append((i,cb))
+
+            row.add_widget(cb)
+            row.add_widget(lbl)
+
+            layout.add_widget(row)
+
+        btn=Button(text="OK",size_hint_y=None,height=dp(50))
+
+        layout.add_widget(btn)
+
+        popup=Popup(title="Kolumny exportu",content=layout,size_hint=(0.9,0.9))
+
+        def save_cols(instance):
+
+            self.export_columns=[i for i,cb in self.export_checks if cb.active]
+
+            popup.dismiss()
+
+        btn.bind(on_press=save_cols)
+
+        popup.open()
+
+
+# EMAIL COLUMN
+    def choose_email_column(self,_):
+
+        layout=BoxLayout(orientation="vertical")
+
+        self.email_checks=[]
+
+        for i,col in enumerate(self.full_data[0]):
+
+            row=BoxLayout(size_hint_y=None,height=dp(40))
+
+            cb=CheckBox(group="email")
+
+            lbl=Label(text=str(col))
+
+            self.email_checks.append((i,cb))
+
+            row.add_widget(cb)
+            row.add_widget(lbl)
+
+            layout.add_widget(row)
+
+        btn=Button(text="OK",size_hint_y=None,height=dp(50))
+
+        layout.add_widget(btn)
+
+        popup=Popup(title="Kolumna email",content=layout,size_hint=(0.9,0.9))
+
+        def save_email(instance):
+
+            for i,cb in self.email_checks:
+                if cb.active:
+                    self.email_column=i
+
+            popup.dismiss()
+
+        btn.bind(on_press=save_email)
+
+        popup.open()
+
+
 # EXPORT
-# =========================
+    def export_files(self,_):
 
-    def export_files(self, _):
+        thread=threading.Thread(target=self.export_thread)
 
-        threading.Thread(
-            target=self._export_thread,
-            daemon=True
-        ).start()
+        thread.start()
 
 
-    def _export_thread(self):
+    def export_thread(self):
 
         from openpyxl import Workbook
+        from datetime import datetime
 
-        if len(self.filtered_data) < 2:
-            return
+        path="/storage/emulated/0/Documents/PaskiFuture"
 
-        documents = "/storage/emulated/0/Documents/PaskiFuture"
+        os.makedirs(path,exist_ok=True)
 
-        os.makedirs(documents, exist_ok=True)
+        header=self.full_data[0]
 
-        header = self.filtered_data[0]
-        rows = self.filtered_data[1:]
+        rows=self.filtered_data[1:]
 
-        total = len(rows)
+        total=len(rows)
 
-        done = 0
+        done=0
 
         for row in rows:
 
-            try:
+            wb=Workbook()
 
-                wb = Workbook()
-                ws = wb.active
+            ws=wb.active
+
+            if self.export_columns:
+
+                ws.append([header[i] for i in self.export_columns])
+
+                ws.append([row[i] for i in self.export_columns])
+
+            else:
 
                 ws.append(header)
                 ws.append(row)
 
-                name = row[1] if len(row) > 1 else "dane"
+            for col in ws.columns:
 
-                name = name.replace("/", "_")
+                max_len=0
 
-                now = datetime.now().strftime("%Y%m%d_%H%M%S")
+                for cell in col:
 
-                filepath = os.path.join(
-                    documents,
-                    f"{name}_{now}.xlsx"
-                )
+                    if cell.value:
 
-                wb.save(filepath)
+                        max_len=max(max_len,len(str(cell.value)))
 
-                done += 1
+                ws.column_dimensions[col[0].column_letter].width=max_len+4
 
-                percent = int((done / total) * 100)
+            name=row[1] if len(row)>1 else "dane"
 
-                Clock.schedule_once(
-                    lambda dt, p=percent: setattr(self.progress, "value", p)
-                )
+            now=datetime.now().strftime("%Y%m%d_%H%M%S")
 
-            except:
-                pass
+            wb.save(f"{path}/{name}_{now}.xlsx")
 
-        Clock.schedule_once(
-            lambda dt: self._popup("Sukces", f"Wyeksportowano {done} plików")
-        )
+            done+=1
+
+            percent=int(done/total*100)
+
+            Clock.schedule_once(lambda dt,p=percent:setattr(self.progress,"value",p))
 
 
-# =========================
-# EMAIL
-# =========================
+# EMAIL SCREEN
+    def build_email(self):
 
-    def _build_email(self):
+        layout=BoxLayout(orientation="vertical",padding=dp(30),spacing=dp(20))
 
-        layout = BoxLayout(
-            orientation="vertical",
-            padding=dp(30),
-            spacing=dp(20)
-        )
+        send1=PremiumButton(text="📧 Wyślij jeden")
+        sendAll=PremiumButton(text="📨 Wyślij wszystkie")
 
-        send1 = PremiumButton(text="📧 Wyślij jeden")
-        sendAll = PremiumButton(text="📨 Wyślij wszystkie")
-        back = PremiumButton(text="⬅")
+        back=PremiumButton(text="⬅")
 
         send1.bind(on_press=self.send_single)
-        sendAll.bind(on_press=self.send_bulk)
+        sendAll.bind(on_press=self.send_all)
 
-        back.bind(on_press=lambda x: setattr(self.sm, "current", "table"))
+        back.bind(on_press=lambda x:setattr(self.sm,"current","table"))
 
         layout.add_widget(send1)
         layout.add_widget(sendAll)
@@ -420,136 +442,124 @@ class PaskiFutureApp(App):
         self.email.add_widget(layout)
 
 
-    def send_single(self, _):
+# SEND EMAIL
+    def send_single(self,_):
 
-        threading.Thread(target=self._send_one).start()
-
-
-    def send_bulk(self, _):
-
-        threading.Thread(target=self._send_all).start()
-
-
-    def _send_one(self):
-
-        if len(self.filtered_data) < 2:
+        if len(self.filtered_data)<2:
             return
 
-        self._send_email_row(self.filtered_data[1])
+        threading.Thread(target=self.send_email,args=(self.filtered_data[1],)).start()
 
 
-    def _send_all(self):
+    def send_all(self,_):
 
         for row in self.filtered_data[1:]:
 
-            self._send_email_row(row)
+            threading.Thread(target=self.send_email,args=(row,)).start()
 
 
-    def _send_email_row(self, row):
+    def send_email(self,row):
+
+        import smtplib
+        from email.message import EmailMessage
+        from openpyxl import Workbook
 
         if not os.path.exists(CONFIG_FILE):
             return
 
         with open(CONFIG_FILE) as f:
-            config = json.load(f)
+            config=json.load(f)
 
-        email_col = int(config.get("email_column", EMAIL_COLUMN_INDEX))
-
-        if email_col >= len(row):
+        if self.email_column>=len(row):
             return
 
-        try:
+        email=row[self.email_column]
 
-            msg = EmailMessage()
+        if not email or "@" not in email:
+            return
 
-            msg["Subject"] = "Dane"
-            msg["From"] = config["email"]
-            msg["To"] = row[email_col]
+        wb=Workbook()
 
-            msg.set_content("Załącznik w wiadomości")
+        ws=wb.active
 
-            server = smtplib.SMTP(config["server"], int(config["port"]))
-            server.starttls()
-            server.login(config["email"], config["password"])
+        ws.append(self.full_data[0])
+        ws.append(row)
 
-            server.send_message(msg)
+        temp=Path(self.user_data_dir)/"temp.xlsx"
 
-            server.quit()
+        wb.save(temp)
 
-        except:
-            pass
+        msg=EmailMessage()
+
+        msg["Subject"]="Dane"
+        msg["From"]=config["email"]
+        msg["To"]=email
+
+        msg.set_content("W załączniku plik.")
+
+        with open(temp,"rb") as f:
+
+            msg.add_attachment(
+                f.read(),
+                maintype="application",
+                subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                filename="dane.xlsx"
+            )
+
+        server=smtplib.SMTP(config["server"],int(config["port"]))
+
+        server.starttls()
+
+        server.login(config["email"],config["password"])
+
+        server.send_message(msg)
+
+        server.quit()
 
 
-# =========================
 # SMTP
-# =========================
+    def build_smtp(self):
 
-    def _build_smtp(self):
+        layout=BoxLayout(orientation="vertical",padding=dp(30),spacing=dp(15))
 
-        layout = BoxLayout(
-            orientation="vertical",
-            padding=dp(30),
-            spacing=dp(15)
-        )
+        self.s_server=TextInput(hint_text="SMTP server")
+        self.s_port=TextInput(hint_text="port")
+        self.s_email=TextInput(hint_text="email")
+        self.s_pass=TextInput(hint_text="hasło",password=True)
 
-        self.s_server = TextInput(hint_text="SMTP server")
-        self.s_port = TextInput(hint_text="port")
-        self.s_email = TextInput(hint_text="email")
-        self.s_pass = TextInput(hint_text="hasło", password=True)
-        self.s_email_col = TextInput(hint_text="kolumna email")
+        save=PremiumButton(text="Zapisz")
 
-        save = PremiumButton(text="💾 zapisz")
-        back = PremiumButton(text="⬅")
+        back=PremiumButton(text="⬅")
 
         save.bind(on_press=self.save_smtp)
-        back.bind(on_press=lambda x: setattr(self.sm, "current", "home"))
+
+        back.bind(on_press=lambda x:setattr(self.sm,"current","home"))
 
         layout.add_widget(self.s_server)
         layout.add_widget(self.s_port)
         layout.add_widget(self.s_email)
         layout.add_widget(self.s_pass)
-        layout.add_widget(self.s_email_col)
         layout.add_widget(save)
         layout.add_widget(back)
 
         self.smtp.add_widget(layout)
 
 
-    def save_smtp(self, _):
+    def save_smtp(self,_):
 
-        data = {
+        data={
 
-            "server": self.s_server.text,
-            "port": self.s_port.text,
-            "email": self.s_email.text,
-            "password": self.s_pass.text,
-            "email_column": self.s_email_col.text or EMAIL_COLUMN_INDEX
+            "server":self.s_server.text,
+            "port":self.s_port.text,
+            "email":self.s_email.text,
+            "password":self.s_pass.text
 
         }
 
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(data, f)
+        with open(CONFIG_FILE,"w") as f:
 
-        self._popup("OK", "SMTP zapisane")
-
-
-# =========================
-# POPUP
-# =========================
-
-    def _popup(self, title, text):
-
-        Popup(
-
-            title=title,
-
-            content=Label(text=text),
-
-            size_hint=(0.8, 0.4)
-
-        ).open()
+            json.dump(data,f)
 
 
-if __name__ == "__main__":
-
+if __name__=="__main__":
     PaskiFutureApp().run()
