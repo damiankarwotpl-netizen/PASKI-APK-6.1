@@ -23,13 +23,9 @@ from kivy.uix.popup import Popup
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.screenmanager import ScreenManager, Screen
 
-from openpyxl import load_workbook, Workbook
-from openpyxl.styles import Font, PatternFill, Border, Side
 
-
-APP_TITLE = "Paski Future 6.1 STABLE PREMIUM"
+APP_TITLE = "Paski Future 6.2 STABLE"
 CONFIG_FILE = "smtp_config.json"
-
 EMAIL_COLUMN_INDEX = 3
 
 
@@ -61,8 +57,8 @@ class PaskiFutureApp(App):
         self.filtered_data = []
         self.current_file = None
 
-        self.export_folder = None
-        self.selected_columns = []
+        self.export_columns = None
+        self.email_column = EMAIL_COLUMN_INDEX
 
         self.sm = ScreenManager()
 
@@ -103,7 +99,7 @@ class PaskiFutureApp(App):
         smtp_btn = PremiumButton(text="⚙ Konfiguracja SMTP")
         smtp_btn.bind(on_press=lambda x: setattr(self.sm, "current", "smtp"))
 
-        self.home_status = Label(text="Gotowy", font_size=16)
+        self.home_status = Label(text="Gotowy")
 
         layout.add_widget(title)
         layout.add_widget(open_btn)
@@ -115,13 +111,13 @@ class PaskiFutureApp(App):
 
 
 # =========================
-# EXCEL PICKER
+# PICKER
 # =========================
 
     def open_excel_picker(self, _):
 
         if platform != "android":
-            self.home_status.text = "Picker działa tylko Android"
+            self.home_status.text = "Picker tylko Android"
             return
 
         from jnius import autoclass
@@ -179,6 +175,8 @@ class PaskiFutureApp(App):
             self._popup("Błąd", "Najpierw wybierz plik")
             return
 
+        from openpyxl import load_workbook
+
         wb = load_workbook(str(self.current_file), data_only=True)
         sheet = wb.active
 
@@ -207,13 +205,10 @@ class PaskiFutureApp(App):
         self.search = TextInput(hint_text="🔎 Wyszukaj...", multiline=False)
         self.search.bind(text=self.filter_data)
 
-        self.column_select = TextInput(
+        self.column_input = TextInput(
             hint_text="Kolumny export np 0,1,2",
             multiline=False
         )
-
-        folder_btn = PremiumButton(text="📁 Folder")
-        folder_btn.bind(on_press=self.pick_export_folder)
 
         export_btn = PremiumButton(text="📦 Eksport")
         export_btn.bind(on_press=self.export_files)
@@ -225,13 +220,12 @@ class PaskiFutureApp(App):
         back_btn.bind(on_press=lambda x: setattr(self.sm, "current", "home"))
 
         top.add_widget(self.search)
-        top.add_widget(self.column_select)
-        top.add_widget(folder_btn)
+        top.add_widget(self.column_input)
         top.add_widget(export_btn)
         top.add_widget(email_btn)
         top.add_widget(back_btn)
 
-        self.scroll = ScrollView()
+        self.scroll = ScrollView(do_scroll_x=True, do_scroll_y=True)
 
         self.grid = GridLayout(size_hint=(None, None), spacing=dp(1))
         self.grid.bind(minimum_height=self.grid.setter('height'))
@@ -239,29 +233,13 @@ class PaskiFutureApp(App):
 
         self.scroll.add_widget(self.grid)
 
-        self.progress = ProgressBar(max=100)
+        self.progress = ProgressBar(max=100, size_hint=(1, 0.05))
 
         layout.add_widget(top)
         layout.add_widget(self.scroll)
         layout.add_widget(self.progress)
 
         self.table.add_widget(layout)
-
-
-# =========================
-# FILTER
-# =========================
-
-    def filter_data(self, instance, value):
-
-        value = value.lower()
-
-        self.filtered_data = [
-            row for row in self.full_data
-            if any(value in str(cell).lower() for cell in row)
-        ]
-
-        self.display_table()
 
 
 # =========================
@@ -278,39 +256,36 @@ class PaskiFutureApp(App):
         rows = len(self.filtered_data)
         cols = len(self.filtered_data[0])
 
+        cell_w = dp(160)
+        cell_h = dp(40)
+
         self.grid.cols = cols
-        self.grid.width = cols * dp(160)
-        self.grid.height = rows * dp(40)
+        self.grid.width = cols * cell_w
+        self.grid.height = rows * cell_h
 
         for row in self.filtered_data:
             for cell in row:
+
                 lbl = Label(
                     text=str(cell),
                     size_hint=(None, None),
-                    size=(dp(160), dp(40))
+                    size=(cell_w, cell_h),
+                    color=(1,1,1,1)
                 )
+
                 self.grid.add_widget(lbl)
 
 
-# =========================
-# FORMAT EXCEL
-# =========================
+    def filter_data(self, instance, value):
 
-    def format_excel(self, ws):
+        value = value.lower()
 
-        header_font = Font(bold=True)
-        fill = PatternFill("solid", fgColor="CCCCCC")
+        self.filtered_data = [
+            row for row in self.full_data
+            if any(value in str(cell).lower() for cell in row)
+        ]
 
-        thin = Side(style="thin")
-        border = Border(left=thin, right=thin, top=thin, bottom=thin)
-
-        for cell in ws[1]:
-            cell.font = header_font
-            cell.fill = fill
-
-        for row in ws.iter_rows():
-            for cell in row:
-                cell.border = border
+        self.display_table()
 
 
 # =========================
@@ -323,20 +298,24 @@ class PaskiFutureApp(App):
 
     def _export_thread(self):
 
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Border, Side
+
         if len(self.filtered_data) < 2:
             return
 
-        documents = self.export_folder or "/storage/emulated/0/Documents/PaskiFuture"
+        documents = "/storage/emulated/0/Documents/PaskiFuture"
         os.makedirs(documents, exist_ok=True)
 
         header = self.full_data[0]
         rows = self.filtered_data[1:]
 
-        if self.column_select.text:
-            cols = [int(x.strip()) for x in self.column_select.text.split(",")]
-            header = [header[i] for i in cols]
-        else:
-            cols = None
+        cols = None
+        if self.column_input.text:
+            try:
+                cols = [int(x) for x in self.column_input.text.split(",")]
+            except:
+                cols = None
 
         total = len(rows)
         done = 0
@@ -347,14 +326,25 @@ class PaskiFutureApp(App):
             ws = wb.active
 
             if cols:
-                data = [row[i] for i in cols]
+                h = [header[i] for i in cols]
+                r = [row[i] for i in cols]
             else:
-                data = row
+                h = header
+                r = row
 
-            ws.append(header)
-            ws.append(data)
+            ws.append(h)
+            ws.append(r)
 
-            self.format_excel(ws)
+            bold = Font(bold=True)
+            thin = Side(style="thin")
+            border = Border(left=thin,right=thin,top=thin,bottom=thin)
+
+            for cell in ws[1]:
+                cell.font = bold
+
+            for rowx in ws.iter_rows():
+                for cell in rowx:
+                    cell.border = border
 
             name = row[1] if len(row) > 1 else "brak"
             now = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -363,11 +353,11 @@ class PaskiFutureApp(App):
             wb.save(filepath)
 
             done += 1
-            percent = int((done / total) * 100)
+            percent = int((done/total)*100)
 
-            Clock.schedule_once(lambda dt, p=percent: setattr(self.progress, "value", p))
+            Clock.schedule_once(lambda dt, p=percent: setattr(self.progress,"value",p))
 
-        Clock.schedule_once(lambda dt: self._popup("Sukces", f"Wyeksportowano {done} plików"))
+        Clock.schedule_once(lambda dt: self._popup("Sukces",f"Wyeksportowano {done} plików"))
 
 
 # =========================
@@ -384,65 +374,59 @@ class PaskiFutureApp(App):
 
         send1.bind(on_press=self.send_single)
         sendAll.bind(on_press=self.send_bulk)
-        back.bind(on_press=lambda x: setattr(self.sm, "current", "table"))
-
-        self.email_status = Label(text="Gotowy")
+        back.bind(on_press=lambda x: setattr(self.sm,"current","table"))
 
         layout.add_widget(send1)
         layout.add_widget(sendAll)
-        layout.add_widget(self.email_status)
         layout.add_widget(back)
 
         self.email.add_widget(layout)
 
 
-    def send_single(self, _):
+    def send_single(self,_):
         threading.Thread(target=self._send_one).start()
 
-
-    def send_bulk(self, _):
+    def send_bulk(self,_):
         threading.Thread(target=self._send_all).start()
 
-
     def _send_one(self):
-
-        if len(self.filtered_data) < 2:
+        if len(self.filtered_data)<2:
             return
-
         self._send_email_row(self.filtered_data[1])
 
-
     def _send_all(self):
-
         for row in self.filtered_data[1:]:
             self._send_email_row(row)
 
 
-    def _send_email_row(self, row):
+    def _send_email_row(self,row):
+
+        from openpyxl import Workbook
 
         if not os.path.exists(CONFIG_FILE):
             return
 
         with open(CONFIG_FILE) as f:
-            config = json.load(f)
+            config=json.load(f)
 
-        wb = Workbook()
-        ws = wb.active
+        email_col=int(config.get("email_column",EMAIL_COLUMN_INDEX))
+
+        wb=Workbook()
+        ws=wb.active
         ws.append(self.full_data[0])
         ws.append(row)
 
-        self.format_excel(ws)
-
-        file = Path(self.user_data_dir) / "temp.xlsx"
+        file=Path(self.user_data_dir)/"temp.xlsx"
         wb.save(file)
 
-        msg = EmailMessage()
-        msg["Subject"] = "Dane"
-        msg["From"] = config["email"]
-        msg["To"] = row[int(config.get("email_column", EMAIL_COLUMN_INDEX))]
-        msg.set_content("W załączniku dane.")
+        msg=EmailMessage()
+        msg["Subject"]="Dane"
+        msg["From"]=config["email"]
+        msg["To"]=row[email_col]
 
-        with open(file, "rb") as f:
+        msg.set_content("W załączniku dane")
+
+        with open(file,"rb") as f:
             msg.add_attachment(
                 f.read(),
                 maintype="application",
@@ -450,9 +434,9 @@ class PaskiFutureApp(App):
                 filename="dane.xlsx"
             )
 
-        server = smtplib.SMTP(config["server"], int(config["port"]))
+        server=smtplib.SMTP(config["server"],int(config["port"]))
         server.starttls()
-        server.login(config["email"], config["password"])
+        server.login(config["email"],config["password"])
         server.send_message(msg)
         server.quit()
 
@@ -463,19 +447,19 @@ class PaskiFutureApp(App):
 
     def _build_smtp(self):
 
-        layout = BoxLayout(orientation="vertical", padding=dp(30), spacing=dp(15))
+        layout=BoxLayout(orientation="vertical",padding=dp(30),spacing=dp(15))
 
-        self.s_server = TextInput(hint_text="SMTP Server")
-        self.s_port = TextInput(hint_text="Port")
-        self.s_email = TextInput(hint_text="Email")
-        self.s_pass = TextInput(hint_text="Hasło", password=True)
-        self.s_email_col = TextInput(hint_text="Kolumna Email np 3")
+        self.s_server=TextInput(hint_text="SMTP Server")
+        self.s_port=TextInput(hint_text="Port")
+        self.s_email=TextInput(hint_text="Email")
+        self.s_pass=TextInput(hint_text="Hasło",password=True)
+        self.s_email_col=TextInput(hint_text="Kolumna Email np 3")
 
-        save = PremiumButton(text="💾 Zapisz")
-        back = PremiumButton(text="⬅ Powrót")
+        save=PremiumButton(text="💾 Zapisz")
+        back=PremiumButton(text="⬅ Powrót")
 
         save.bind(on_press=self.save_smtp)
-        back.bind(on_press=lambda x: setattr(self.sm, "current", "home"))
+        back.bind(on_press=lambda x:setattr(self.sm,"current","home"))
 
         layout.add_widget(self.s_server)
         layout.add_widget(self.s_port)
@@ -488,33 +472,34 @@ class PaskiFutureApp(App):
         self.smtp.add_widget(layout)
 
 
-    def save_smtp(self, _):
+    def save_smtp(self,_):
 
-        data = {
-            "server": self.s_server.text,
-            "port": self.s_port.text,
-            "email": self.s_email.text,
-            "password": self.s_pass.text,
-            "email_column": self.s_email_col.text
+        data={
+            "server":self.s_server.text,
+            "port":self.s_port.text,
+            "email":self.s_email.text,
+            "password":self.s_pass.text,
+            "email_column":self.s_email_col.text or EMAIL_COLUMN_INDEX
         }
 
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(data, f)
+        with open(CONFIG_FILE,"w") as f:
+            json.dump(data,f)
 
-        self._popup("Sukces", "SMTP zapisane")
+        self._popup("Sukces","SMTP zapisane")
 
 
 # =========================
 # POPUP
 # =========================
 
-    def _popup(self, title, text):
+    def _popup(self,title,text):
+
         Popup(
             title=title,
             content=Label(text=text),
-            size_hint=(0.8, 0.4)
+            size_hint=(0.8,0.4)
         ).open()
 
 
-if __name__ == "__main__":
+if __name__=="__main__":
     PaskiFutureApp().run()
