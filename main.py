@@ -116,11 +116,11 @@ class PaskiFutureApp(App):
         load_btn = PremiumButton(text="📊 Wczytaj dane")
         load_btn.bind(on_press=self.load_full_excel)
 
-        smtp_btn = PremiumButton(text="⚙ Konfiguracja SMTP")
-        smtp_btn.bind(on_press=lambda x: setattr(self.sm, "current", "smtp"))
-
         email_excel_btn = PremiumButton(text="📧 Wybierz Email Excel")
         email_excel_btn.bind(on_press=self.select_email_excel)
+
+        smtp_btn = PremiumButton(text="⚙ Konfiguracja SMTP")
+        smtp_btn.bind(on_press=lambda x: setattr(self.sm, "current", "smtp"))
 
         layout.add_widget(title)
         layout.add_widget(open_btn)
@@ -138,16 +138,18 @@ class PaskiFutureApp(App):
         if platform != "android":
             self.home_status.text = "Picker działa tylko Android"
             return
-        from jnius import autoclass
-        from android import activity
-        PythonActivity = autoclass("org.kivy.android.PythonActivity")
-        Intent = autoclass("android.content.Intent")
-        intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
-        intent.setType("*/*")
-        intent.addCategory(Intent.CATEGORY_OPENABLE)
-        activity.unbind(on_activity_result=self._on_activity_result)
-        activity.bind(on_activity_result=self._on_activity_result)
-        PythonActivity.mActivity.startActivityForResult(intent, 999)
+        try:
+            from jnius import autoclass
+            from android import activity
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            Intent = autoclass("android.content.Intent")
+            intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            intent.setType("*/*")
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+            activity.bind(on_activity_result=self._on_activity_result)
+            PythonActivity.mActivity.startActivityForResult(intent, 999)
+        except Exception as e:
+            self._popup("Błąd", f"Nie udało się otworzyć picker: {e}")
 
     def _on_activity_result(self, request_code, result_code, intent):
         if request_code != 999 or not intent:
@@ -155,22 +157,22 @@ class PaskiFutureApp(App):
         from android import activity
         from jnius import autoclass
         activity.unbind(on_activity_result=self._on_activity_result)
-        try:
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
-            resolver = PythonActivity.mActivity.getContentResolver()
-            uri = intent.getData()
-            local_file = Path(self.user_data_dir) / "selected.xlsx"
-            with resolver.openInputStream(uri) as input_stream, open(local_file, "wb") as out:
-                buffer = bytearray(4096)
-                while True:
-                    read = input_stream.read(buffer)
-                    if read == -1:
-                        break
-                    out.write(buffer[:read])
-            self.current_file = local_file
-            self.home_status.text = "Plik wybrany"
-        except Exception as e:
-            self._popup("Błąd", f"Nie udało się wczytać pliku: {e}")
+
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        resolver = PythonActivity.mActivity.getContentResolver()
+        uri = intent.getData()
+        input_stream = resolver.openInputStream(uri)
+        local_file = Path(self.user_data_dir) / "selected.xlsx"
+        with open(local_file, "wb") as out:
+            buffer = bytearray(4096)
+            while True:
+                read = input_stream.read(buffer)
+                if read == -1:
+                    break
+                out.write(buffer[:read])
+        input_stream.close()
+        self.current_file = local_file
+        self.home_status.text = "Plik wybrany"
 
     # ---------------------------
     # Load Excel
@@ -201,7 +203,7 @@ class PaskiFutureApp(App):
         folder_btn.bind(on_press=self.pick_export_folder)
 
         export_btn = PremiumButton(text="📦 Eksport")
-        export_btn.bind(on_press=lambda x: threading.Thread(target=self._export_thread, daemon=True).start())
+        export_btn.bind(on_press=self.export_files)
 
         email_btn = PremiumButton(text="📬 Email")
         email_btn.bind(on_press=lambda x: setattr(self.sm, "current", "email"))
@@ -221,7 +223,7 @@ class PaskiFutureApp(App):
         self.grid.bind(minimum_width=self.grid.setter('width'))
         self.scroll.add_widget(self.grid)
 
-        self.progress = ProgressBar(max=100)
+        self.progress = ProgressBar(max=100, value=0)
         layout.add_widget(top)
         layout.add_widget(self.scroll)
         layout.add_widget(self.progress)
@@ -238,7 +240,6 @@ class PaskiFutureApp(App):
         PythonActivity = autoclass("org.kivy.android.PythonActivity")
         Intent = autoclass("android.content.Intent")
         intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
-        activity.unbind(on_activity_result=self._on_folder_result)
         activity.bind(on_activity_result=self._on_folder_result)
         PythonActivity.mActivity.startActivityForResult(intent, 777)
 
@@ -291,6 +292,9 @@ class PaskiFutureApp(App):
     # ---------------------------
     # Export Excel
     # ---------------------------
+    def export_files(self, _):
+        threading.Thread(target=self._export_thread, daemon=True).start()
+
     def _export_thread(self):
         if len(self.filtered_data) < 2:
             return
@@ -329,40 +333,41 @@ class PaskiFutureApp(App):
     # ---------------------------
     def select_email_excel(self):
         if platform != "android":
-            self._popup("Błąd", "Picker działa tylko na Android")
+            self._popup("Błąd", "Picker działa tylko Android")
             return
-        from jnius import autoclass
-        from android import activity
-        PythonActivity = autoclass("org.kivy.android.PythonActivity")
-        Intent = autoclass("android.content.Intent")
-        intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
-        intent.setType("*/*")
-        intent.addCategory(Intent.CATEGORY_OPENABLE)
-        activity.unbind(on_activity_result=self._on_email_excel_result)
-        activity.bind(on_activity_result=self._on_email_excel_result)
-        PythonActivity.mActivity.startActivityForResult(intent, 555)
+        try:
+            from jnius import autoclass
+            from android import activity
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            Intent = autoclass("android.content.Intent")
+            intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            intent.setType("*/*")
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+            activity.bind(on_activity_result=self._on_email_excel_result)
+            PythonActivity.mActivity.startActivityForResult(intent, 555)
+        except Exception as e:
+            self._popup("Błąd", f"Nie udało się otworzyć picker: {e}")
 
     def _on_email_excel_result(self, request_code, result_code, intent):
-        from android import activity
-        from jnius import autoclass
         if request_code != 555 or not intent:
             return
+        from android import activity
         activity.unbind(on_activity_result=self._on_email_excel_result)
         try:
+            from jnius import autoclass
             PythonActivity = autoclass("org.kivy.android.PythonActivity")
             resolver = PythonActivity.mActivity.getContentResolver()
             uri = intent.getData()
-            if not uri:
-                self._popup("Błąd", "Nie wybrano pliku")
-                return
+            input_stream = resolver.openInputStream(uri)
             local_file = Path(self.user_data_dir) / "email_list.xlsx"
-            with resolver.openInputStream(uri) as input_stream, open(local_file, "wb") as out:
+            with open(local_file, "wb") as out:
                 buffer = bytearray(4096)
                 while True:
                     read = input_stream.read(buffer)
                     if read == -1:
                         break
                     out.write(buffer[:read])
+            input_stream.close()
             self.email_file = local_file
             self._popup("Email Excel wybrany", str(local_file))
             self._load_email_file()
@@ -370,13 +375,16 @@ class PaskiFutureApp(App):
             self._popup("Błąd", f"Nie udało się wczytać pliku: {e}")
 
     def _load_email_file(self):
-        if not self.email_file or not self.email_file.exists():
+        if not self.email_file:
             return
         try:
             wb = load_workbook(str(self.email_file), data_only=True)
             sheet = wb.active
             self.email_dict = {}
             header = [str(c).strip() for c in next(sheet.iter_rows(values_only=True))]
+            if "Name" not in header or "Surname" not in header or "Email" not in header:
+                self._popup("Błąd", "Plik musi zawierać kolumny: Name, Surname, Email")
+                return
             name_idx = header.index("Name")
             surname_idx = header.index("Surname")
             email_idx = header.index("Email")
@@ -387,12 +395,15 @@ class PaskiFutureApp(App):
                 self.email_dict[key] = str(row[email_idx]).strip()
             wb.close()
         except Exception as e:
-            self._popup("Błąd", f"Błąd wczytywania Excel: {e}")
+            self._popup("Błąd", f"Nie udało się wczytać maili: {e}")
 
     def _get_email_for_row(self, row):
-        name = str(row[0]).strip().lower()
-        surname = str(row[1]).strip().lower()
-        return self.email_dict.get(f"{name} {surname}")
+        try:
+            name = str(row[0]).strip().lower()
+            surname = str(row[1]).strip().lower()
+            return self.email_dict.get(f"{name} {surname}")
+        except:
+            return None
 
     # ---------------------------
     # Email Screen
@@ -400,6 +411,7 @@ class PaskiFutureApp(App):
     def _build_email(self):
         layout = BoxLayout(orientation="vertical", padding=dp(30), spacing=dp(20))
         self.email_status = Label(text="Gotowy")
+        self.email_progress = ProgressBar(max=100, value=0)
         send1 = PremiumButton(text="📧 Wyślij 1 rekord")
         sendAll = PremiumButton(text="📨 Wyślij hurtowo")
         back = PremiumButton(text="⬅ Powrót")
@@ -411,6 +423,7 @@ class PaskiFutureApp(App):
         layout.add_widget(send1)
         layout.add_widget(sendAll)
         layout.add_widget(self.email_status)
+        layout.add_widget(self.email_progress)
         layout.add_widget(back)
         self.email.add_widget(layout)
 
@@ -419,44 +432,59 @@ class PaskiFutureApp(App):
         self._send_email_row(self.filtered_data[1])
 
     def _send_all(self):
+        if len(self.filtered_data) < 2: return
+        threading.Thread(target=self._send_all_thread, daemon=True).start()
+
+    def _send_all_thread(self):
+        total = len(self.filtered_data[1:])
+        done = 0
         for row in self.filtered_data[1:]:
             self._send_email_row(row)
+            done += 1
+            percent = int((done / total) * 100)
+            Clock.schedule_once(lambda dt, p=percent: setattr(self.email_progress, "value", p))
+        Clock.schedule_once(lambda dt: self._popup("Sukces", f"Wysłano {done} maili"))
 
     def _send_email_row(self, row):
         if not os.path.exists(CONFIG_FILE):
-            return
-        with open(CONFIG_FILE) as f:
-            config = json.load(f)
+            Clock.schedule_once(lambda dt: self._popup("Błąd", "Najpierw skonfiguruj SMTP"))
+            return False
         email = self._get_email_for_row(row)
         if not email:
             Clock.schedule_once(lambda dt: setattr(self.email_status, "text", f"Nie znaleziono email dla: {row[0]} {row[1]}"))
-            return
+            return False
+        try:
+            with open(CONFIG_FILE) as f:
+                config = json.load(f)
+            wb = Workbook()
+            ws = wb.active
+            ws.append(self.full_data[0])
+            ws.append(row)
+            file = Path(self.user_data_dir)/"temp.xlsx"
+            wb.save(file)
 
-        wb = Workbook()
-        ws = wb.active
-        ws.append(self.full_data[0])
-        ws.append(row)
-        file = Path(self.user_data_dir)/"temp.xlsx"
-        wb.save(file)
+            msg = EmailMessage()
+            msg["Subject"] = "Dane"
+            msg["From"] = config["email"]
+            msg["To"] = email
+            msg.set_content("W załączniku dane.")
 
-        msg = EmailMessage()
-        msg["Subject"] = "Dane"
-        msg["From"] = config["email"]
-        msg["To"] = email
-        msg.set_content("W załączniku dane.")
+            with open(file, "rb") as f:
+                msg.add_attachment(f.read(), maintype="application",
+                                   subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                   filename="dane.xlsx")
 
-        with open(file, "rb") as f:
-            msg.add_attachment(f.read(), maintype="application",
-                               subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                               filename="dane.xlsx")
+            server = smtplib.SMTP(config["server = smtplib.SMTP(config["server"], int(config["port"]))
+            server.starttls()
+            server.login(config["email"], config["password"])
+            server.send_message(msg)
+            server.quit()
 
-        server = smtplib.SMTP(config["server"], int(config["port"]))
-        server.starttls()
-        server.login(config["email"], config["password"])
-        server.send_message(msg)
-        server.quit()
-
-        Clock.schedule_once(lambda dt: setattr(self.email_status, "text", f"Wysłano: {row[0]} {row[1]}"))
+            Clock.schedule_once(lambda dt: setattr(self.email_status, "text", f"Wysłano: {row[0]} {row[1]}"))
+            return True
+        except Exception as e:
+            Clock.schedule_once(lambda dt: self._popup("Błąd wysyłki", str(e)))
+            return False
 
     # ---------------------------
     # SMTP Screen
@@ -480,6 +508,18 @@ class PaskiFutureApp(App):
         layout.add_widget(back)
         self.smtp.add_widget(layout)
 
+        # Load previous config if exists
+        if os.path.exists(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE) as f:
+                    data = json.load(f)
+                    self.s_server.text = data.get("server", "")
+                    self.s_port.text = data.get("port", "")
+                    self.s_email.text = data.get("email", "")
+                    self.s_pass.text = data.get("password", "")
+            except:
+                pass
+
     def save_smtp(self, _):
         data = {
             "server": self.s_server.text.strip(),
@@ -487,21 +527,16 @@ class PaskiFutureApp(App):
             "email": self.s_email.text.strip(),
             "password": self.s_pass.text.strip()
         }
-        try:
-            with open(CONFIG_FILE, "w") as f:
-                json.dump(data, f)
-            self._popup("Sukces", "SMTP zapisane")
-        except Exception as e:
-            self._popup("Błąd", f"Nie udało się zapisać: {e}")
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(data, f)
+        self._popup("Sukces", "SMTP zapisane")
 
     # ---------------------------
     # Popup
     # ---------------------------
     def _popup(self, title, text):
-        popup = Popup(title=title, content=Label(text=text),
-                      size_hint=(0.8, 0.4))
+        popup = Popup(title=title, content=Label(text=text), size_hint=(0.8, 0.4))
         popup.open()
-
 
 if __name__ == "__main__":
     PaskiFutureApp().run()
