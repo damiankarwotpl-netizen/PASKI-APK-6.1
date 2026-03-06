@@ -28,6 +28,7 @@ from openpyxl.styles import Border, Side, Font, Alignment
 
 APP_TITLE = "Paski Future 6.1 STABLE PREMIUM"
 CONFIG_FILE = "smtp_config.json"
+EXPORT_CONFIG = "export_folder.json"
 EMAIL_COLUMN_INDEX = 3
 
 
@@ -58,7 +59,9 @@ class PaskiFutureApp(App):
         self.full_data = []
         self.filtered_data = []
         self.current_file = None
+
         self.export_folder = None
+        self.load_export_folder()
 
         self.sm = ScreenManager()
 
@@ -79,9 +82,28 @@ class PaskiFutureApp(App):
 
         return self.sm
 
-    # ======================================================
-    # HOME
-    # ======================================================
+# ======================================================
+# ZAPIS / ODCZYT FOLDERU
+# ======================================================
+
+    def save_export_folder(self):
+
+        if not self.export_folder:
+            return
+
+        with open(EXPORT_CONFIG, "w") as f:
+            json.dump({"folder": self.export_folder}, f)
+
+    def load_export_folder(self):
+
+        if os.path.exists(EXPORT_CONFIG):
+            with open(EXPORT_CONFIG) as f:
+                data = json.load(f)
+                self.export_folder = data.get("folder")
+
+# ======================================================
+# HOME
+# ======================================================
 
     def _build_home(self):
 
@@ -108,9 +130,67 @@ class PaskiFutureApp(App):
 
         self.home.add_widget(layout)
 
-    # ======================================================
-    # LOAD EXCEL
-    # ======================================================
+# ======================================================
+# PICKER EXCEL
+# ======================================================
+
+    def open_excel_picker(self, _):
+
+        if platform != "android":
+            self.home_status.text = "Picker działa tylko Android"
+            return
+
+        from jnius import autoclass
+        from android import activity
+
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        Intent = autoclass("android.content.Intent")
+
+        intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+        intent.setType("*/*")
+        intent.addCategory(Intent.CATEGORY_OPENABLE)
+
+        activity.bind(on_activity_result=self._on_activity_result)
+        PythonActivity.mActivity.startActivityForResult(intent, 999)
+
+
+    def _on_activity_result(self, request_code, result_code, intent):
+
+        if request_code != 999 or not intent:
+            return
+
+        from android import activity
+        activity.unbind(on_activity_result=self._on_activity_result)
+
+        from jnius import autoclass
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+
+        resolver = PythonActivity.mActivity.getContentResolver()
+        uri = intent.getData()
+        input_stream = resolver.openInputStream(uri)
+
+        local_file = Path(self.user_data_dir) / "selected.xlsx"
+
+        with open(local_file, "wb") as output:
+
+            buffer = bytearray(4096)
+
+            while True:
+                bytes_read = input_stream.read(buffer)
+
+                if bytes_read == -1:
+                    break
+
+                output.write(buffer[:bytes_read])
+
+        input_stream.close()
+
+        self.current_file = local_file
+        self.home_status.text = "Plik wybrany"
+
+# ======================================================
+# LOAD EXCEL
+# ======================================================
 
     def load_full_excel(self, _):
 
@@ -129,12 +209,14 @@ class PaskiFutureApp(App):
         wb.close()
 
         self.filtered_data = self.full_data
+
         self.display_table()
+
         self.sm.current = "table"
 
-    # ======================================================
-    # TABLE
-    # ======================================================
+# ======================================================
+# TABLE
+# ======================================================
 
     def _build_table(self):
 
@@ -146,21 +228,31 @@ class PaskiFutureApp(App):
             hint_text="🔎 Wyszukaj...",
             multiline=False
         )
+
         self.search.bind(text=self.filter_data)
+
+        folder_btn = PremiumButton(text="📁 Folder")
+        folder_btn.bind(on_press=self.pick_export_folder)
 
         export_btn = PremiumButton(text="📦 Eksport")
         export_btn.bind(on_press=self.export_files)
+
+        email_btn = PremiumButton(text="📬 Email")
+        email_btn.bind(on_press=lambda x: setattr(self.sm, "current", "email"))
 
         back_btn = PremiumButton(text="⬅ Powrót")
         back_btn.bind(on_press=lambda x: setattr(self.sm, "current", "home"))
 
         top.add_widget(self.search)
+        top.add_widget(folder_btn)
         top.add_widget(export_btn)
+        top.add_widget(email_btn)
         top.add_widget(back_btn)
 
         self.scroll = ScrollView()
 
         self.grid = GridLayout(size_hint=(None, None), spacing=dp(1))
+
         self.grid.bind(minimum_height=self.grid.setter('height'))
         self.grid.bind(minimum_width=self.grid.setter('width'))
 
@@ -174,11 +266,62 @@ class PaskiFutureApp(App):
 
         self.table.add_widget(layout)
 
-    # ======================================================
-    # FILTER
-    # ======================================================
+# ======================================================
+# PICKER FOLDER
+# ======================================================
+
+    def pick_export_folder(self, _):
+
+        if platform != "android":
+            return
+
+        from jnius import autoclass
+        from android import activity
+
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        Intent = autoclass("android.content.Intent")
+
+        intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+
+        activity.bind(on_activity_result=self._on_folder_result)
+        PythonActivity.mActivity.startActivityForResult(intent, 777)
+
+
+    def _on_folder_result(self, request_code, result_code, intent):
+
+        if request_code != 777 or not intent:
+            return
+
+        from android import activity
+        activity.unbind(on_activity_result=self._on_folder_result)
+
+        uri = intent.getData()
+
+        if not uri:
+            return
+
+        uri_string = uri.toString()
+
+        if "primary:" in uri_string:
+            folder = uri_string.split("primary:")[1]
+            path = f"/storage/emulated/0/{folder}"
+        else:
+            path = "/storage/emulated/0"
+
+        os.makedirs(path, exist_ok=True)
+
+        self.export_folder = path
+
+        self.save_export_folder()
+
+        self._popup("Folder ustawiony", path)
+
+# ======================================================
+# FILTER
+# ======================================================
 
     def filter_data(self, instance, value):
+
         value = value.lower()
 
         self.filtered_data = [
@@ -188,9 +331,9 @@ class PaskiFutureApp(App):
 
         self.display_table()
 
-    # ======================================================
-    # TABLE DISPLAY
-    # ======================================================
+# ======================================================
+# TABLE DISPLAY
+# ======================================================
 
     def display_table(self):
 
@@ -207,6 +350,7 @@ class PaskiFutureApp(App):
         self.grid.height = rows * dp(40)
 
         for row in self.filtered_data:
+
             for cell in row:
 
                 lbl = Label(
@@ -217,19 +361,21 @@ class PaskiFutureApp(App):
 
                 self.grid.add_widget(lbl)
 
-    # ======================================================
-    # EXPORT (POPRAWIONE RAMKI + NAGŁÓWEK)
-    # ======================================================
+# ======================================================
+# EXPORT
+# ======================================================
 
     def export_files(self, _):
         threading.Thread(target=self._export_thread).start()
+
 
     def _export_thread(self):
 
         if len(self.filtered_data) < 2:
             return
 
-        documents = "/storage/emulated/0/Documents/PaskiFuture"
+        documents = self.export_folder or "/storage/emulated/0/Documents/PaskiFuture"
+
         os.makedirs(documents, exist_ok=True)
 
         header = self.full_data[0]
@@ -256,6 +402,7 @@ class PaskiFutureApp(App):
             for col in range(1, len(header)+1):
 
                 cell = ws.cell(row=1, column=col)
+
                 cell.font = Font(bold=True)
                 cell.alignment = Alignment(horizontal="center")
                 cell.border = border
@@ -263,27 +410,32 @@ class PaskiFutureApp(App):
             for col in range(1, len(header)+1):
 
                 cell = ws.cell(row=2, column=col)
+
                 cell.alignment = Alignment(horizontal="center")
                 cell.border = border
 
             name = row[1] if len(row) > 1 else "brak"
+
             now = datetime.now().strftime("%Y%m%d_%H%M%S")
 
             filepath = os.path.join(documents, f"{name}_{now}.xlsx")
+
             wb.save(filepath)
 
             done += 1
 
             percent = int((done / total) * 100)
+
             Clock.schedule_once(lambda dt, p=percent: setattr(self.progress, "value", p))
 
         Clock.schedule_once(lambda dt: self._popup("Sukces", f"Wyeksportowano {done} plików"))
 
-    # ======================================================
-    # POPUP
-    # ======================================================
+# ======================================================
+# POPUP
+# ======================================================
 
     def _popup(self, title, text):
+
         Popup(
             title=title,
             content=Label(text=text),
