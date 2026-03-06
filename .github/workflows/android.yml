@@ -1,5 +1,5 @@
 name: Build Paski Future 1.0 APK
-
+ 
 on:
   workflow_dispatch:
     inputs:
@@ -10,25 +10,66 @@ on:
         type: choice
         options:
           - debug
-
+ 
 jobs:
   build:
     runs-on: ubuntu-22.04
     timeout-minutes: 90
-
+ 
     steps:
       - uses: actions/checkout@v4
-
+ 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
+ 
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
+      # ---------- CACHE (NOWE) ----------
+
+      - name: Cache Buildozer
+        uses: actions/cache@v4
+        with:
+          path: |
+            .buildozer
+            ~/.buildozer
+          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            buildozer-${{ runner.os }}-
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle
+          key: gradle-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
+
+      - name: Cache Android SDK/NDK
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer/android/platform
+          key: android-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            android-${{ runner.os }}-
+
+      # ---------- INSTALL ----------
 
       - name: Install system dependencies
         run: |
@@ -39,15 +80,22 @@ jobs:
             zlib1g-dev libncurses5-dev \
             libncursesw5-dev libtinfo5 \
             cmake libffi-dev libssl-dev
+
       - name: Install Buildozer toolchain
         run: |
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install buildozer==1.5.0 cython==0.29.36
+
+      # ---------- SDK INIT ----------
+
       - name: Initialize Android SDK/NDK
         run: |
           mkdir -p artifacts
           (yes || true) | buildozer android update 2>&1 | tee artifacts/buildozer-update.log
           exit ${PIPESTATUS[1]}
+
+      # ---------- LICENSE ACCEPT ----------
+
       - name: Accept Android SDK licenses
         run: |
           accepted=0
@@ -72,11 +120,17 @@ jobs:
           if [ "$accepted" -eq 0 ]; then
             echo "sdkmanager not found; continuing because Buildozer may manage licenses internally."
           fi
+
+      # ---------- BUILD APK ----------
+
       - name: Build APK
         run: |
           mkdir -p artifacts
           (yes || true) | buildozer android debug 2>&1 | tee artifacts/buildozer.log
           exit ${PIPESTATUS[1]}
+
+      # ---------- LOGS ----------
+
       - name: Upload build logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -86,6 +140,8 @@ jobs:
             artifacts/buildozer-update.log
             artifacts/buildozer.log
           if-no-files-found: warn
+
+      # ---------- APK ----------
 
       - name: Upload APK artifact
         if: success()
