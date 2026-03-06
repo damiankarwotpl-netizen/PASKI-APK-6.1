@@ -5,7 +5,6 @@ import threading
 from pathlib import Path
 from datetime import datetime
 from email.message import EmailMessage
-from io import BytesIO
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -80,7 +79,8 @@ class PaskiFutureApp(App):
 
         return self.sm
 
-    # ================= HOME =================
+
+# ================= HOME =================
 
     def _build_home(self):
 
@@ -107,7 +107,8 @@ class PaskiFutureApp(App):
 
         self.home.add_widget(layout)
 
-    # ================= ANDROID PICKER =================
+
+# ================= ANDROID FILE PICKER =================
 
     def open_excel_picker(self, _):
 
@@ -124,9 +125,11 @@ class PaskiFutureApp(App):
         intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
         intent.setType("*/*")
         intent.addCategory(Intent.CATEGORY_OPENABLE)
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
         activity.bind(on_activity_result=self._on_activity_result)
         PythonActivity.mActivity.startActivityForResult(intent, 999)
+
 
     def _on_activity_result(self, request_code, result_code, intent):
 
@@ -142,24 +145,30 @@ class PaskiFutureApp(App):
 
         resolver = PythonActivity.mActivity.getContentResolver()
         uri = intent.getData()
+
         input_stream = resolver.openInputStream(uri)
 
         local_file = Path(self.user_data_dir) / "selected.xlsx"
 
         with open(local_file, "wb") as output:
+
             buffer = bytearray(4096)
+
             while True:
-                read = input_stream.read(buffer)
-                if read == -1:
+                bytes_read = input_stream.read(buffer)
+
+                if bytes_read == -1:
                     break
-                output.write(buffer[:read])
+
+                output.write(buffer[:bytes_read])
 
         input_stream.close()
 
         self.current_file = local_file
         self.home_status.text = "Plik wybrany"
 
-    # ================= LOAD EXCEL =================
+
+# ================= LOAD EXCEL =================
 
     def load_full_excel(self, _):
 
@@ -177,11 +186,17 @@ class PaskiFutureApp(App):
 
         wb.close()
 
+        if not self.full_data:
+            self._popup("Błąd", "Plik pusty")
+            return
+
         self.filtered_data = self.full_data
         self.display_table()
+
         self.sm.current = "table"
 
-    # ================= TABLE =================
+
+# ================= TABLE =================
 
     def _build_table(self):
 
@@ -191,12 +206,15 @@ class PaskiFutureApp(App):
 
         self.search = TextInput(
             hint_text="🔎 Wyszukaj...",
-            multiline=False
+            multiline=False,
+            background_color=(0.15,0.18,0.25,1),
+            foreground_color=(1,1,1,1)
         )
+
         self.search.bind(text=self.filter_data)
 
         folder_btn = PremiumButton(text="📁 Folder eksportu")
-        folder_btn.bind(on_press=self.select_export_folder)
+        folder_btn.bind(on_press=self.open_folder_picker)
 
         export_btn = PremiumButton(text="📦 Eksport")
         export_btn.bind(on_press=self.export_files)
@@ -214,13 +232,14 @@ class PaskiFutureApp(App):
         top.add_widget(back_btn)
 
         self.scroll = ScrollView(do_scroll_x=True, do_scroll_y=True)
-        self.grid = GridLayout(size_hint=(None, None), spacing=dp(1))
-        self.grid.bind(minimum_height=self.grid.setter('height'))
-        self.grid.bind(minimum_width=self.grid.setter('width'))
+
+        self.grid = GridLayout(size_hint=(None,None), spacing=dp(1))
+        self.grid.bind(minimum_height=self.grid.setter("height"))
+        self.grid.bind(minimum_width=self.grid.setter("width"))
 
         self.scroll.add_widget(self.grid)
 
-        self.progress = ProgressBar(max=100, size_hint=(1, 0.05))
+        self.progress = ProgressBar(max=100, size_hint=(1,0.05))
 
         layout.add_widget(top)
         layout.add_widget(self.scroll)
@@ -228,64 +247,30 @@ class PaskiFutureApp(App):
 
         self.table.add_widget(layout)
 
-    def display_table(self):
 
-        self.grid.clear_widgets()
+# ================= FOLDER PICKER =================
 
-        rows = len(self.filtered_data)
-        cols = len(self.filtered_data[0])
-
-        cell_w = dp(160)
-        cell_h = dp(40)
-
-        self.grid.cols = cols
-        self.grid.width = cols * cell_w
-        self.grid.height = rows * cell_h
-
-        for r_index, row in enumerate(self.filtered_data):
-            for cell in row:
-
-                lbl = Label(
-                    text=str(cell),
-                    size_hint=(None, None),
-                    size=(cell_w, cell_h)
-                )
-
-                self.grid.add_widget(lbl)
-
-    def filter_data(self, instance, value):
-
-        value = value.lower()
-
-        self.filtered_data = [
-            row for row in self.full_data
-            if any(value in str(cell).lower() for cell in row)
-        ]
-
-        self.display_table()
-
-    # ================= FOLDER PICKER =================
-
-    def select_export_folder(self, _):
+    def open_folder_picker(self, _):
 
         if platform != "android":
-            self._popup("Błąd", "Tylko Android")
+            self._popup("Błąd","Picker działa tylko Android")
             return
 
         from jnius import autoclass
         from android import activity
 
-        Intent = autoclass("android.content.Intent")
         PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        Intent = autoclass("android.content.Intent")
 
         intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
 
         activity.bind(on_activity_result=self._on_folder_result)
-        PythonActivity.mActivity.startActivityForResult(intent, 555)
+        PythonActivity.mActivity.startActivityForResult(intent, 1001)
+
 
     def _on_folder_result(self, request_code, result_code, intent):
 
-        if request_code != 555 or not intent:
+        if request_code != 1001 or not intent:
             return
 
         from android import activity
@@ -293,71 +278,261 @@ class PaskiFutureApp(App):
 
         self.export_uri = intent.getData()
 
-        self._popup("OK", "Folder eksportu ustawiony")
+        self._popup("OK","Folder eksportu ustawiony")
 
-    # ================= EXPORT =================
 
-    def export_files(self, _):
+# ================= TABLE LOGIC =================
+
+    def display_table(self):
+
+        self.grid.clear_widgets()
+
+        if not self.filtered_data:
+            return
+
+        rows=len(self.filtered_data)
+        cols=len(self.filtered_data[0])
+
+        cell_w=dp(160)
+        cell_h=dp(40)
+
+        self.grid.cols=cols
+        self.grid.width=cols*cell_w
+        self.grid.height=rows*cell_h
+
+        for r,row in enumerate(self.filtered_data):
+
+            for cell in row:
+
+                lbl=Label(
+                    text=str(cell),
+                    size_hint=(None,None),
+                    size=(cell_w,cell_h),
+                    color=(1,1,1,1)
+                )
+
+                self.grid.add_widget(lbl)
+
+
+    def filter_data(self,instance,value):
+
+        value=value.lower()
+
+        self.filtered_data=[
+            row for row in self.full_data
+            if any(value in str(cell).lower() for cell in row)
+        ]
+
+        self.display_table()
+
+
+# ================= EXPORT =================
+
+    def export_files(self,_):
+
         threading.Thread(target=self._export_thread).start()
+
 
     def _export_thread(self):
 
+        if len(self.filtered_data)<2:
+            return
+
         if not self.export_uri:
-            Clock.schedule_once(lambda dt: self._popup("Błąd", "Najpierw wybierz folder eksportu"))
+            Clock.schedule_once(lambda dt:self._popup("Błąd","Najpierw wybierz folder eksportu"))
             return
 
         from jnius import autoclass
 
-        PythonActivity = autoclass("org.kivy.android.PythonActivity")
-        resolver = PythonActivity.mActivity.getContentResolver()
+        PythonActivity=autoclass("org.kivy.android.PythonActivity")
+        DocumentsContract=autoclass("android.provider.DocumentsContract")
 
-        header = self.full_data[0]
-        rows = self.filtered_data[1:]
+        resolver=PythonActivity.mActivity.getContentResolver()
 
-        total = len(rows)
-        done = 0
+        header=self.full_data[0]
+        rows=self.filtered_data[1:]
+
+        total=len(rows)
+        done=0
 
         for row in rows:
 
-            wb = Workbook()
-            ws = wb.active
+            wb=Workbook()
+            ws=wb.active
             ws.append(header)
             ws.append(row)
 
-            bio = BytesIO()
-            wb.save(bio)
-            bio.seek(0)
+            name=row[1] if len(row)>1 else "brak"
+            now=datetime.now().strftime("%Y%m%d_%H%M%S")
 
-            name = row[1] if len(row) > 1 else "dane"
-            now = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename=f"{name}_{now}.xlsx"
 
-            filename = f"{name}_{now}.xlsx"
-
-            uri = autoclass("android.provider.DocumentsContract").createDocument(
+            uri=DocumentsContract.createDocument(
                 resolver,
                 self.export_uri,
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 filename
             )
 
-            stream = resolver.openOutputStream(uri)
-            stream.write(bio.read())
+            stream=resolver.openOutputStream(uri)
+
+            wb.save(stream)
+
             stream.close()
 
-            done += 1
+            done+=1
 
-            percent = int((done / total) * 100)
-            Clock.schedule_once(lambda dt, p=percent: setattr(self.progress, "value", p))
+            percent=int((done/total)*100)
 
-        Clock.schedule_once(lambda dt: self._popup("Sukces", f"Wyeksportowano {done} plików"))
+            Clock.schedule_once(
+                lambda dt,p=percent:setattr(self.progress,"value",p)
+            )
 
-    # ================= POPUP =================
+        Clock.schedule_once(
+            lambda dt:self._popup("Sukces",f"Wyeksportowano {done} plików")
+        )
 
-    def _popup(self, title, text):
+
+# ================= EMAIL =================
+
+    def _build_email(self):
+
+        layout=BoxLayout(orientation="vertical",padding=dp(30),spacing=dp(20))
+
+        send1=PremiumButton(text="📧 Wyślij 1 rekord")
+        sendAll=PremiumButton(text="📨 Wyślij hurtowo")
+        back=PremiumButton(text="⬅ Powrót")
+
+        send1.bind(on_press=self.send_single)
+        sendAll.bind(on_press=self.send_bulk)
+        back.bind(on_press=lambda x:setattr(self.sm,"current","table"))
+
+        self.email_status=Label(text="Gotowy")
+
+        layout.add_widget(send1)
+        layout.add_widget(sendAll)
+        layout.add_widget(self.email_status)
+        layout.add_widget(back)
+
+        self.email.add_widget(layout)
+
+
+    def send_single(self,_):
+
+        threading.Thread(target=self._send_one).start()
+
+
+    def send_bulk(self,_):
+
+        threading.Thread(target=self._send_all).start()
+
+
+    def _send_one(self):
+
+        if len(self.filtered_data)<2:
+            return
+
+        self._send_email_row(self.filtered_data[1])
+
+
+    def _send_all(self):
+
+        for row in self.filtered_data[1:]:
+
+            self._send_email_row(row)
+
+
+    def _send_email_row(self,row):
+
+        if not os.path.exists(CONFIG_FILE):
+            return
+
+        with open(CONFIG_FILE) as f:
+            config=json.load(f)
+
+        wb=Workbook()
+        ws=wb.active
+        ws.append(self.full_data[0])
+        ws.append(row)
+
+        file=Path(self.user_data_dir)/"temp.xlsx"
+
+        wb.save(file)
+
+        msg=EmailMessage()
+
+        msg["Subject"]="Dane"
+        msg["From"]=config["email"]
+        msg["To"]=row[EMAIL_COLUMN_INDEX]
+
+        msg.set_content("W załączniku dane.")
+
+        with open(file,"rb") as f:
+
+            msg.add_attachment(
+                f.read(),
+                maintype="application",
+                subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                filename="dane.xlsx"
+            )
+
+        server=smtplib.SMTP(config["server"],int(config["port"]))
+        server.starttls()
+        server.login(config["email"],config["password"])
+        server.send_message(msg)
+        server.quit()
+
+
+# ================= SMTP =================
+
+    def _build_smtp(self):
+
+        layout=BoxLayout(orientation="vertical",padding=dp(30),spacing=dp(15))
+
+        self.s_server=TextInput(hint_text="SMTP Server")
+        self.s_port=TextInput(hint_text="Port")
+        self.s_email=TextInput(hint_text="Email")
+        self.s_pass=TextInput(hint_text="Hasło",password=True)
+
+        save=PremiumButton(text="💾 Zapisz")
+        back=PremiumButton(text="⬅ Powrót")
+
+        save.bind(on_press=self.save_smtp)
+        back.bind(on_press=lambda x:setattr(self.sm,"current","home"))
+
+        layout.add_widget(self.s_server)
+        layout.add_widget(self.s_port)
+        layout.add_widget(self.s_email)
+        layout.add_widget(self.s_pass)
+        layout.add_widget(save)
+        layout.add_widget(back)
+
+        self.smtp.add_widget(layout)
+
+
+    def save_smtp(self,_):
+
+        data={
+            "server":self.s_server.text,
+            "port":self.s_port.text,
+            "email":self.s_email.text,
+            "password":self.s_pass.text
+        }
+
+        with open(CONFIG_FILE,"w") as f:
+            json.dump(data,f)
+
+        self._popup("Sukces","SMTP zapisane")
+
+
+# ================= POPUP =================
+
+    def _popup(self,title,text):
+
         Popup(
             title=title,
             content=Label(text=text),
-            size_hint=(0.8, 0.4)
+            size_hint=(0.8,0.4)
         ).open()
 
 
