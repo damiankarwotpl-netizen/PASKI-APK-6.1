@@ -54,7 +54,6 @@ class PremiumButton(Button):
 # Main App
 # -------------------------------
 class PaskiFutureApp(App):
-
     def build(self):
         self.title = APP_TITLE
         Window.clearcolor = (0.08, 0.1, 0.15, 1)
@@ -65,7 +64,7 @@ class PaskiFutureApp(App):
         self.export_folder = None
         self.email_file = None
         self.email_dict = {}
-
+        os.makedirs(self.user_data_dir, exist_ok=True)
         self.load_export_folder()
 
         # Screen Manager
@@ -136,7 +135,7 @@ class PaskiFutureApp(App):
     # ---------------------------
     def open_excel_picker(self, _):
         if platform != "android":
-            self.home_status.text = "Picker działa tylko Android"
+            self.home_status.text = "Picker działa tylko na Androidzie"
             return
         from jnius import autoclass
         from android import activity
@@ -153,13 +152,13 @@ class PaskiFutureApp(App):
             return
         from android import activity
         activity.unbind(on_activity_result=self._on_activity_result)
-
         from jnius import autoclass
         PythonActivity = autoclass("org.kivy.android.PythonActivity")
         resolver = PythonActivity.mActivity.getContentResolver()
         uri = intent.getData()
         input_stream = resolver.openInputStream(uri)
         local_file = Path(self.user_data_dir) / "selected.xlsx"
+        os.makedirs(self.user_data_dir, exist_ok=True)
         with open(local_file, "wb") as out:
             buffer = bytearray(4096)
             while True:
@@ -231,6 +230,7 @@ class PaskiFutureApp(App):
     # ---------------------------
     def pick_export_folder(self, _):
         if platform != "android":
+            self._popup("Błąd", "Folder picker działa tylko na Androidzie")
             return
         from jnius import autoclass
         from android import activity
@@ -325,8 +325,7 @@ class PaskiFutureApp(App):
     # ---------------------------
     # Email Screen
     # ---------------------------
-    def _build_email(self):
-        layout = BoxLayout(orientation="vertical", padding=dp(30), spacing=dp(20))
+    layout = BoxLayout(orientation="vertical", padding=dp(30), spacing=dp(20))
         self.email_status = Label(text="Gotowy")
         self.email_progress = ProgressBar(max=100, value=0)
         send1 = PremiumButton(text="📧 Wyślij 1 rekord")
@@ -345,11 +344,15 @@ class PaskiFutureApp(App):
         self.email.add_widget(layout)
 
     def _send_one(self):
-        if len(self.filtered_data) < 2: return
+        if len(self.filtered_data) < 2:
+            self._popup("Błąd", "Brak danych do wysyłki")
+            return
         self._send_email_row(self.filtered_data[1])
 
     def _send_all(self):
-        if len(self.filtered_data) < 2: return
+        if len(self.filtered_data) < 2:
+            self._popup("Błąd", "Brak danych do wysyłki")
+            return
         threading.Thread(target=self._send_all_thread, daemon=True).start()
 
     def _send_all_thread(self):
@@ -409,7 +412,7 @@ class PaskiFutureApp(App):
     # ---------------------------
     def select_email_excel(self, _):
         if platform != "android":
-            self.email_status.text = "Picker działa tylko Android"
+            self._popup("Błąd", "Picker działa tylko na Androidzie")
             return
         from jnius import autoclass
         from android import activity
@@ -432,6 +435,7 @@ class PaskiFutureApp(App):
         uri = intent.getData()
         input_stream = resolver.openInputStream(uri)
         local_file = Path(self.user_data_dir) / "email_list.xlsx"
+        os.makedirs(self.user_data_dir, exist_ok=True)
         with open(local_file, "wb") as out:
             buffer = bytearray(4096)
             while True:
@@ -451,9 +455,14 @@ class PaskiFutureApp(App):
         sheet = wb.active
         self.email_dict = {}
         header = [str(c) for c in next(sheet.iter_rows(values_only=True))]
-        name_idx = header.index("Name")
-        surname_idx = header.index("Surname")
-        email_idx = header.index("Email")
+        try:
+            name_idx = header.index("Name")
+            surname_idx = header.index("Surname")
+            email_idx = header.index("Email")
+        except ValueError:
+            self._popup("Błąd", "Plik email musi zawierać kolumny: Name, Surname, Email")
+            wb.close()
+            return
         for row in sheet.iter_rows(min_row=2, values_only=True):
             key = f"{row[name_idx].strip().lower()} {row[surname_idx].strip().lower()}"
             self.email_dict[key] = row[email_idx]
@@ -480,7 +489,6 @@ class PaskiFutureApp(App):
 
         layout.add_widget(self.s_server)
         layout.add_widget(self.s_port)
-        layout.add_widget
         layout.add_widget(self.s_email)
         layout.add_widget(self.s_pass)
         layout.add_widget(save)
@@ -512,3 +520,6 @@ class PaskiFutureApp(App):
         btn.bind(on_release=popup.dismiss)
         content.add_widget(btn)
         popup.open()
+
+if __name__ == "__main__":
+    PaskiFutureApp().run()
