@@ -1,18 +1,10 @@
 import os
 import json
+import threading
+from pathlib import Path
+from datetime import datetime
 import smtplib
-import threading
-from pathlib import Path
-from datetime import datetime
 from email.message import EmailMessage
-
-from kivy.app import App
-from kivy.clock import Clock
-from kivy.core.window import Windowimport os
-import json
-import threading
-from pathlib import Path
-from datetime import datetime
 
 from kivy.app import App
 from kivy.clock import Clock
