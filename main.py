@@ -24,26 +24,19 @@ from kivy.uix.progressbar import ProgressBar
 from kivy.uix.screenmanager import ScreenManager, Screen
 
 from openpyxl import load_workbook, Workbook
+from openpyxl.styles import Border, Side, Font, Alignment, PatternFill
 
 
 APP_TITLE = "Paski Future 6.1 STABLE PREMIUM"
 CONFIG_FILE = "smtp_config.json"
-EMAIL_COLUMN_INDEX = 3  # kolumna z emailem (liczone od 0)
+EMAIL_COLUMN_INDEX = 3
 
-
-# =========================
-# SCREENS
-# =========================
 
 class HomeScreen(Screen): pass
 class TableScreen(Screen): pass
 class EmailScreen(Screen): pass
 class SMTPScreen(Screen): pass
 
-
-# =========================
-# PREMIUM BUTTON
-# =========================
 
 class PremiumButton(Button):
     def __init__(self, **kwargs):
@@ -56,10 +49,6 @@ class PremiumButton(Button):
         self.height = dp(48)
 
 
-# =========================
-# MAIN APP
-# =========================
-
 class PaskiFutureApp(App):
 
     def build(self):
@@ -70,6 +59,8 @@ class PaskiFutureApp(App):
         self.full_data = []
         self.filtered_data = []
         self.current_file = None
+
+        self.export_folder = None
 
         self.sm = ScreenManager()
 
@@ -90,9 +81,48 @@ class PaskiFutureApp(App):
 
         return self.sm
 
-    # ======================================================
-    # HOME
-    # ======================================================
+
+# ======================================================
+# FORMAT EXCEL (NOWA FUNKCJA)
+# ======================================================
+
+    def format_excel(self, ws):
+
+        thin = Side(style="thin")
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+        header_font = Font(bold=True, size=12)
+        header_fill = PatternFill("solid", fgColor="D9E1F2")
+
+        center = Alignment(horizontal="center", vertical="center")
+
+        max_row = ws.max_row
+        max_col = ws.max_column
+
+        for col in range(1, max_col + 1):
+            cell = ws.cell(row=1, column=col)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center
+
+        for row in ws.iter_rows(min_row=1, max_row=max_row, min_col=1, max_col=max_col):
+            for cell in row:
+                cell.border = border
+
+        for col in ws.columns:
+            max_length = 0
+            col_letter = col[0].column_letter
+
+            for cell in col:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+
+            ws.column_dimensions[col_letter].width = max_length + 4
+
+
+# ======================================================
+# HOME
+# ======================================================
 
     def _build_home(self):
 
@@ -119,14 +149,15 @@ class PaskiFutureApp(App):
 
         self.home.add_widget(layout)
 
-    # ======================================================
-    # ANDROID PICKER
-    # ======================================================
+
+# ======================================================
+# PICKER EXCEL
+# ======================================================
 
     def open_excel_picker(self, _):
 
         if platform != "android":
-            self.home_status.text = "Picker działa tylko na Android"
+            self.home_status.text = "Picker działa tylko Android"
             return
 
         from jnius import autoclass
@@ -138,10 +169,10 @@ class PaskiFutureApp(App):
         intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
         intent.setType("*/*")
         intent.addCategory(Intent.CATEGORY_OPENABLE)
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
         activity.bind(on_activity_result=self._on_activity_result)
         PythonActivity.mActivity.startActivityForResult(intent, 999)
+
 
     def _on_activity_result(self, request_code, result_code, intent):
 
@@ -173,9 +204,10 @@ class PaskiFutureApp(App):
         self.current_file = local_file
         self.home_status.text = "Plik wybrany"
 
-    # ======================================================
-    # LOAD EXCEL
-    # ======================================================
+
+# ======================================================
+# LOAD EXCEL
+# ======================================================
 
     def load_full_excel(self, _):
 
@@ -193,17 +225,14 @@ class PaskiFutureApp(App):
 
         wb.close()
 
-        if not self.full_data:
-            self._popup("Błąd", "Plik pusty")
-            return
-
         self.filtered_data = self.full_data
         self.display_table()
         self.sm.current = "table"
 
-    # ======================================================
-    # TABLE (Excel UI 3.0)
-    # ======================================================
+
+# ======================================================
+# TABLE
+# ======================================================
 
     def _build_table(self):
 
@@ -213,11 +242,12 @@ class PaskiFutureApp(App):
 
         self.search = TextInput(
             hint_text="🔎 Wyszukaj...",
-            multiline=False,
-            background_color=(0.15, 0.18, 0.25, 1),
-            foreground_color=(1, 1, 1, 1)
+            multiline=False
         )
         self.search.bind(text=self.filter_data)
+
+        folder_btn = PremiumButton(text="📁 Folder")
+        folder_btn.bind(on_press=self.pick_export_folder)
 
         export_btn = PremiumButton(text="📦 Eksport")
         export_btn.bind(on_press=self.export_files)
@@ -229,24 +259,46 @@ class PaskiFutureApp(App):
         back_btn.bind(on_press=lambda x: setattr(self.sm, "current", "home"))
 
         top.add_widget(self.search)
+        top.add_widget(folder_btn)
         top.add_widget(export_btn)
         top.add_widget(email_btn)
         top.add_widget(back_btn)
 
-        self.scroll = ScrollView(do_scroll_x=True, do_scroll_y=True)
+        self.scroll = ScrollView()
+
         self.grid = GridLayout(size_hint=(None, None), spacing=dp(1))
         self.grid.bind(minimum_height=self.grid.setter('height'))
         self.grid.bind(minimum_width=self.grid.setter('width'))
 
         self.scroll.add_widget(self.grid)
 
-        self.progress = ProgressBar(max=100, size_hint=(1, 0.05))
+        self.progress = ProgressBar(max=100)
 
         layout.add_widget(top)
         layout.add_widget(self.scroll)
         layout.add_widget(self.progress)
 
         self.table.add_widget(layout)
+
+
+# ======================================================
+# FILTER
+# ======================================================
+
+    def filter_data(self, instance, value):
+        value = value.lower()
+
+        self.filtered_data = [
+            row for row in self.full_data
+            if any(value in str(cell).lower() for cell in row)
+        ]
+
+        self.display_table()
+
+
+# ======================================================
+# TABLE DISPLAY
+# ======================================================
 
     def display_table(self):
 
@@ -258,12 +310,9 @@ class PaskiFutureApp(App):
         rows = len(self.filtered_data)
         cols = len(self.filtered_data[0])
 
-        cell_w = dp(160)
-        cell_h = dp(40)
-
         self.grid.cols = cols
-        self.grid.width = cols * cell_w
-        self.grid.height = rows * cell_h
+        self.grid.width = cols * dp(160)
+        self.grid.height = rows * dp(40)
 
         for r_index, row in enumerate(self.filtered_data):
             for cell in row:
@@ -271,48 +320,26 @@ class PaskiFutureApp(App):
                 lbl = Label(
                     text=str(cell),
                     size_hint=(None, None),
-                    size=(cell_w, cell_h),
-                    text_size=(cell_w - dp(10), None),
-                    halign="left",
-                    valign="middle",
-                    color=(1, 1, 1, 1)
+                    size=(dp(160), dp(40))
                 )
-
-                if r_index == 0:
-                    with lbl.canvas.before:
-                        Color(0.2, 0.45, 0.85, 1)
-                        lbl.bg = Rectangle(size=lbl.size, pos=lbl.pos)
-                else:
-                    with lbl.canvas.before:
-                        Color(0.12, 0.15, 0.22, 1)
-                        lbl.bg = Rectangle(size=lbl.size, pos=lbl.pos)
-
-                lbl.bind(size=lambda inst, val: setattr(inst.bg, "size", inst.size))
-                lbl.bind(pos=lambda inst, val: setattr(inst.bg, "pos", inst.pos))
 
                 self.grid.add_widget(lbl)
 
-    def filter_data(self, instance, value):
-        value = value.lower()
-        self.filtered_data = [
-            row for row in self.full_data
-            if any(value in str(cell).lower() for cell in row)
-        ]
-        self.display_table()
 
-    # ======================================================
-    # EXPORT
-    # ======================================================
+# ======================================================
+# EXPORT
+# ======================================================
 
     def export_files(self, _):
         threading.Thread(target=self._export_thread).start()
+
 
     def _export_thread(self):
 
         if len(self.filtered_data) < 2:
             return
 
-        documents = "/storage/emulated/0/Documents/PaskiFuture"
+        documents = self.export_folder or "/storage/emulated/0/Documents/PaskiFuture"
         os.makedirs(documents, exist_ok=True)
 
         header = self.full_data[0]
@@ -328,6 +355,8 @@ class PaskiFutureApp(App):
             ws.append(header)
             ws.append(row)
 
+            self.format_excel(ws)
+
             name = row[1] if len(row) > 1 else "brak"
             now = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -335,14 +364,16 @@ class PaskiFutureApp(App):
             wb.save(filepath)
 
             done += 1
+
             percent = int((done / total) * 100)
             Clock.schedule_once(lambda dt, p=percent: setattr(self.progress, "value", p))
 
         Clock.schedule_once(lambda dt: self._popup("Sukces", f"Wyeksportowano {done} plików"))
 
-    # ======================================================
-    # EMAIL
-    # ======================================================
+
+# ======================================================
+# EMAIL
+# ======================================================
 
     def _build_email(self):
 
@@ -365,20 +396,25 @@ class PaskiFutureApp(App):
 
         self.email.add_widget(layout)
 
+
     def send_single(self, _):
         threading.Thread(target=self._send_one).start()
 
+
     def send_bulk(self, _):
         threading.Thread(target=self._send_all).start()
+
 
     def _send_one(self):
         if len(self.filtered_data) < 2:
             return
         self._send_email_row(self.filtered_data[1])
 
+
     def _send_all(self):
         for row in self.filtered_data[1:]:
             self._send_email_row(row)
+
 
     def _send_email_row(self, row):
 
@@ -392,6 +428,8 @@ class PaskiFutureApp(App):
         ws = wb.active
         ws.append(self.full_data[0])
         ws.append(row)
+
+        self.format_excel(ws)
 
         file = Path(self.user_data_dir) / "temp.xlsx"
         wb.save(file)
@@ -416,9 +454,10 @@ class PaskiFutureApp(App):
         server.send_message(msg)
         server.quit()
 
-    # ======================================================
-    # SMTP
-    # ======================================================
+
+# ======================================================
+# SMTP
+# ======================================================
 
     def _build_smtp(self):
 
@@ -444,20 +483,25 @@ class PaskiFutureApp(App):
 
         self.smtp.add_widget(layout)
 
+
     def save_smtp(self, _):
+
         data = {
             "server": self.s_server.text,
             "port": self.s_port.text,
             "email": self.s_email.text,
             "password": self.s_pass.text
         }
+
         with open(CONFIG_FILE, "w") as f:
             json.dump(data, f)
+
         self._popup("Sukces", "SMTP zapisane")
 
-    # ======================================================
-    # POPUP
-    # ======================================================
+
+# ======================================================
+# POPUP
+# ======================================================
 
     def _popup(self, title, text):
         Popup(
