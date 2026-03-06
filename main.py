@@ -614,74 +614,125 @@ class FutureApp(App):
 
     def export_excel(self):
 
-        from openpyxl import Workbook
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, Border, Side
+    from datetime import datetime
+    from pathlib import Path
 
-        rows = self.filtered_data
+    rows = self.filtered_data
 
-        if not rows:
-            return
+    if not rows:
+        return
 
-        folder = Path("/storage/emulated/0/Documents/FutureExport")
+    folder = Path("/storage/emulated/0/Documents/FutureExport")
+    folder.mkdir(parents=True, exist_ok=True)
 
-        folder.mkdir(parents=True, exist_ok=True)
+    header = rows[0]
 
-        header = rows[0]
+    if self.export_columns:
+        header = [header[i] for i in self.export_columns]
+
+    thin = Side(style="thin")
+
+    border = Border(
+        left=thin,
+        right=thin,
+        top=thin,
+        bottom=thin
+    )
+
+    total = len(rows) - 1
+
+    for i, row in enumerate(rows[1:]):
+
+        wb = Workbook()
+        ws = wb.active
+
+        # ========================
+        # NAGŁÓWEK RAPORTU
+        # ========================
+
+        ws.merge_cells(
+            start_row=1,
+            start_column=1,
+            end_row=1,
+            end_column=len(header)
+        )
+
+        title = ws.cell(row=1, column=1)
+        title.value = "Raport danych"
+        title.font = Font(size=14, bold=True)
+        title.alignment = Alignment(horizontal="center")
+
+        ws.append([])
+
+        # ========================
+        # DANE
+        # ========================
+
+        ws.append(header)
 
         if self.export_columns:
-            header = [header[i] for i in self.export_columns]
+            row = [row[i] for i in self.export_columns]
 
-        total = len(rows) - 1
+        ws.append(row)
 
-        for i, row in enumerate(rows[1:]):
+        # ========================
+        # RAMKI KOMÓREK
+        # ========================
 
-            wb = Workbook()
+        for r in ws.iter_rows():
+            for c in r:
+                c.border = border
 
-            ws = wb.active
+        # ========================
+        # AUTO SZEROKOŚĆ
+        # ========================
 
-            ws.append(header)
+        for col in ws.columns:
 
-            if self.export_columns:
+            length = 0
 
-                row = [row[i] for i in self.export_columns]
+            for cell in col:
 
-            ws.append(row)
+                if cell.value:
+                    length = max(length, len(str(cell.value)))
 
-            # autosize kolumn
+            ws.column_dimensions[col[0].column_letter].width = length + 4
 
-            for col in ws.columns:
+        # ========================
+        # NAZWA PLIKU
+        # ========================
 
-                length = 0
+        if len(row) >= 2:
 
-                for cell in col:
+            name = f"{row[0]} {row[1]}"
 
-                    if cell.value:
+        else:
 
-                        length = max(
-                            length,
-                            len(str(cell.value))
-                        )
+            name = str(row[0]) if row else "file"
 
-                ws.column_dimensions[
-                    col[0].column_letter
-                ].width = length + 4
+        name = name.replace("/", "").replace("\\", "")
 
-            name = row[0] if row else "file"
+        now = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-            now = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file = folder / f"{name}_{now}.xlsx"
 
-            file = folder / f"{name}_{now}.xlsx"
+        wb.save(file)
 
-            wb.save(file)
+        percent = int((i + 1) / total * 100)
 
-            percent = int((i + 1) / total * 100)
-
-            Clock.schedule_once(
-                lambda dt, p=percent: setattr(self.progress, "value", p)
-            )
+        from kivy.clock import Clock
 
         Clock.schedule_once(
-            lambda dt: self.popup("Export", "Zakończony")
+            lambda dt, p=percent: setattr(self.progress, "value", p)
         )
+
+    from kivy.clock import Clock
+
+    Clock.schedule_once(
+        lambda dt: self.popup("Export", "Zakończony")
+    )
 
 
 # -----------------------------
