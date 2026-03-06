@@ -367,12 +367,21 @@ class PaskiFutureApp(App):
 
             filename=f"{name}_{now}.xlsx"
 
-            uri=DocumentsContract.createDocument(
+            tree_uri = self.export_uri
+
+            tree_doc_id = DocumentsContract.getTreeDocumentId(tree_uri)
+
+            folder_uri = DocumentsContract.buildDocumentUriUsingTree(
+                tree_uri,
+                tree_doc_ id                 
+            )
+
+            uri = DocumentsContract.createDocument(
                 resolver,
-                self.export_uri,
+                folder_uri,
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 filename
-            )
+           )
 
             stream=resolver.openOutputStream(uri)
 
