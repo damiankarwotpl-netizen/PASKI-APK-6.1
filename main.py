@@ -716,3 +716,279 @@ class FutureApp(App):
 if __name__ == "__main__":
 
     FutureApp().run()
+
+
+# =========================================================
+# FUTURE APP SAFE PATCH (SMTP + TEST + PROVIDERS + ATTACH)
+# Wklej na samym końcu pliku main.py
+# =========================================================
+
+from kivy.uix.spinner import Spinner
+
+
+# ---------------------------------------------------------
+# SMTP TEST
+# ---------------------------------------------------------
+
+def patched_test_smtp(self, _):
+
+    import smtplib
+
+    try:
+
+        server = smtplib.SMTP(
+            self.smtp_server.text,
+            int(self.smtp_port.text),
+            timeout=20
+        )
+
+        server.starttls()
+
+        server.login(
+            self.smtp_user.text,
+            self.smtp_pass.text
+        )
+
+        server.quit()
+
+        self.popup("SMTP", "Połączenie OK")
+
+    except Exception as e:
+
+        self.popup("SMTP ERROR", str(e))
+
+
+FutureApp.test_smtp = patched_test_smtp
+
+
+# ---------------------------------------------------------
+# SMTP SCREEN PATCH (PROVIDERS + TEST BUTTON)
+# ---------------------------------------------------------
+
+def patched_build_smtp(self):
+
+    layout = BoxLayout(
+        orientation="vertical",
+        padding=dp(20),
+        spacing=dp(10)
+    )
+
+    title = Label(text="SMTP", font_size=22)
+
+    provider = Spinner(
+        text="Własny",
+        values=(
+            "Gmail",
+            "Outlook",
+            "WP",
+            "Onet",
+            "Interia",
+            "Własny"
+        )
+    )
+
+    self.smtp_server = TextInput(hint_text="SMTP server", multiline=False)
+    self.smtp_port = TextInput(hint_text="Port", multiline=False)
+    self.smtp_user = TextInput(hint_text="Email", multiline=False)
+    self.smtp_pass = TextInput(hint_text="Hasło", multiline=False, password=True)
+
+    def set_provider(spinner, text):
+
+        if text == "Gmail":
+
+            self.smtp_server.text = "smtp.gmail.com"
+            self.smtp_port.text = "587"
+
+        elif text == "Outlook":
+
+            self.smtp_server.text = "smtp.office365.com"
+            self.smtp_port.text = "587"
+
+        elif text == "WP":
+
+            self.smtp_server.text = "smtp.wp.pl"
+            self.smtp_port.text = "587"
+
+        elif text == "Onet":
+
+            self.smtp_server.text = "smtp.poczta.onet.pl"
+            self.smtp_port.text = "587"
+
+        elif text == "Interia":
+
+            self.smtp_server.text = "poczta.interia.pl"
+            self.smtp_port.text = "587"
+
+    provider.bind(text=set_provider)
+
+    save = PremiumButton(text="Zapisz")
+    save.bind(on_press=self.save_smtp)
+
+    test = PremiumButton(text="Test SMTP")
+    test.bind(on_press=self.test_smtp)
+
+    back = PremiumButton(text="Powrót")
+    back.bind(on_press=lambda x: setattr(self.sm, "current", "home"))
+
+    layout.add_widget(title)
+    layout.add_widget(provider)
+    layout.add_widget(self.smtp_server)
+    layout.add_widget(self.smtp_port)
+    layout.add_widget(self.smtp_user)
+    layout.add_widget(self.smtp_pass)
+
+    layout.add_widget(save)
+    layout.add_widget(test)
+    layout.add_widget(back)
+
+    self.smtp.clear_widgets()
+    self.smtp.add_widget(layout)
+
+
+FutureApp.build_smtp = patched_build_smtp
+
+
+# ---------------------------------------------------------
+# EMAIL THREAD PATCH (XLSX ATTACHMENT)
+# ---------------------------------------------------------
+
+def patched_email_thread(self):
+
+    import smtplib
+    from email.message import EmailMessage
+    from openpyxl import Workbook
+    from pathlib import Path
+
+    smtp = self.load_smtp()
+
+    if not smtp:
+
+        Clock.schedule_once(
+            lambda dt: self.popup("Błąd", "SMTP nie skonfigurowane")
+        )
+
+        return
+
+    try:
+
+        server = smtplib.SMTP(
+            smtp["server"],
+            int(smtp["port"]),
+            timeout=30
+        )
+
+        server.starttls()
+
+        server.login(
+            smtp["user"],
+            smtp["pass"]
+        )
+
+    except Exception as e:
+
+        Clock.schedule_once(
+            lambda dt: self.popup("SMTP error", str(e))
+        )
+
+        return
+
+    col = self.email_columns[0]
+
+    rows = self.full_data[1:]
+
+    header = self.full_data[0]
+
+    total = len(rows)
+
+    sent = 0
+    errors = 0
+
+    folder = Path(self.user_data_dir) / "mail_temp"
+    folder.mkdir(parents=True, exist_ok=True)
+
+    for i, row in enumerate(rows):
+
+        if col >= len(row):
+            continue
+
+        email = str(row[col]).strip()
+
+        if not email or "@" not in email:
+            continue
+
+        msg = EmailMessage()
+
+        msg["Subject"] = "Informacja"
+        msg["From"] = smtp["user"]
+        msg["To"] = email
+
+        msg.set_content("Wiadomość wygenerowana automatycznie")
+
+        name = str(row[0]).replace(" ", "_") if row else "plik"
+
+        file = folder / f"{name}.xlsx"
+
+        wb = Workbook()
+
+        ws = wb.active
+
+        ws.append(header)
+        ws.append(row)
+
+        for col_cells in ws.columns:
+
+            max_len = 0
+
+            for cell in col_cells:
+
+                if cell.value:
+
+                    max_len = max(max_len, len(str(cell.value)))
+
+            ws.column_dimensions[
+                col_cells[0].column_letter
+            ].width = max_len + 4
+
+        wb.save(file)
+
+        try:
+
+            with open(file, "rb") as f:
+
+                msg.add_attachment(
+                    f.read(),
+                    maintype="application",
+                    subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    filename=file.name
+                )
+
+        except Exception:
+            pass
+
+        try:
+
+            server.send_message(msg)
+            sent += 1
+
+        except Exception:
+
+            errors += 1
+
+        progress = int((i + 1) / total * 100)
+
+        Clock.schedule_once(
+            lambda dt, p=progress: setattr(self.progress, "value", p)
+        )
+
+    server.quit()
+
+    Clock.schedule_once(
+
+        lambda dt: self.popup(
+            "Email",
+            f"Wysłano: {sent}\nBłędy: {errors}"
+        )
+    )
+
+
+FutureApp._email_thread = patched_email_thread
