@@ -172,5 +172,5 @@ jobs:
         with:
           name: paski-future-build
           path: |
-            bin/*.apk
-            bin/*.aab
+            path: |
+               **/*.apk
