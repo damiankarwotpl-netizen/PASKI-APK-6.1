@@ -709,6 +709,337 @@ class FutureApp(App):
         popup.open()
 
 
+# =========================================================
+# FUTURE APP MAIL ENGINE PATCH
+# =========================================================
+
+from kivy.uix.spinner import Spinner
+
+
+# ---------------------------------------------------------
+# LOAD EMAIL EXCEL
+# ---------------------------------------------------------
+
+def patched_load_email_excel(self, path):
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(path, data_only=True)
+    sheet = wb.active
+
+    rows = list(sheet.iter_rows(values_only=True))
+
+    header = [str(x).lower() for x in rows[0]]
+
+    name_i = header.index("imię")
+    surname_i = header.index("nazwisko")
+    email_i = header.index("email")
+
+    self.email_map = {}
+
+    for row in rows[1:]:
+
+        name = str(row[name_i]).strip()
+        surname = str(row[surname_i]).strip()
+        email = str(row[email_i]).strip()
+
+        key = f"{name} {surname}".lower()
+
+        self.email_map[key] = email
+
+    wb.close()
+
+    self.popup("Email", f"Wczytano {len(self.email_map)} adresów")
+
+
+# ---------------------------------------------------------
+# EMAIL MATCH
+# ---------------------------------------------------------
+
+def patched_find_email(self, row):
+
+    if not hasattr(self, "email_map"):
+        return None
+
+    if len(row) < 2:
+        return None
+
+    name = str(row[0]).strip()
+    surname = str(row[1]).strip()
+
+    key = f"{name} {surname}".lower()
+
+    return self.email_map.get(key)
+
+
+# ---------------------------------------------------------
+# SMTP TEST
+# ---------------------------------------------------------
+
+def patched_test_smtp(self, _):
+
+    import smtplib
+
+    try:
+
+        server = smtplib.SMTP(
+            self.smtp_server.text,
+            int(self.smtp_port.text),
+            timeout=20
+        )
+
+        server.starttls()
+
+        server.login(
+            self.smtp_user.text,
+            self.smtp_pass.text
+        )
+
+        server.quit()
+
+        self.popup("SMTP", "Połączenie OK")
+
+    except Exception as e:
+
+        self.popup("SMTP ERROR", str(e))
+
+
+# ---------------------------------------------------------
+# SMTP SCREEN
+# ---------------------------------------------------------
+
+def patched_build_smtp(self):
+
+    layout = BoxLayout(
+        orientation="vertical",
+        padding=dp(20),
+        spacing=dp(10)
+    )
+
+    title = Label(text="SMTP", font_size=22)
+
+    provider = Spinner(
+        text="Własny",
+        values=("Gmail","Outlook","WP","Onet","Interia","Własny")
+    )
+
+    self.smtp_server = TextInput(hint_text="SMTP server", multiline=False)
+    self.smtp_port = TextInput(hint_text="Port", multiline=False)
+    self.smtp_user = TextInput(hint_text="Email", multiline=False)
+    self.smtp_pass = TextInput(hint_text="Hasło", multiline=False, password=True)
+
+    def set_provider(spinner, text):
+
+        if text == "Gmail":
+            self.smtp_server.text = "smtp.gmail.com"
+            self.smtp_port.text = "587"
+
+        elif text == "Outlook":
+            self.smtp_server.text = "smtp.office365.com"
+            self.smtp_port.text = "587"
+
+        elif text == "WP":
+            self.smtp_server.text = "smtp.wp.pl"
+            self.smtp_port.text = "587"
+
+        elif text == "Onet":
+            self.smtp_server.text = "smtp.poczta.onet.pl"
+            self.smtp_port.text = "587"
+
+        elif text == "Interia":
+            self.smtp_server.text = "poczta.interia.pl"
+            self.smtp_port.text = "587"
+
+    provider.bind(text=set_provider)
+
+    save = PremiumButton(text="Zapisz")
+    save.bind(on_press=self.save_smtp)
+
+    test = PremiumButton(text="Test SMTP")
+    test.bind(on_press=self.test_smtp)
+
+    back = PremiumButton(text="Powrót")
+    back.bind(on_press=lambda x: setattr(self.sm,"current","home"))
+
+    layout.add_widget(title)
+    layout.add_widget(provider)
+    layout.add_widget(self.smtp_server)
+    layout.add_widget(self.smtp_port)
+    layout.add_widget(self.smtp_user)
+    layout.add_widget(self.smtp_pass)
+
+    layout.add_widget(save)
+    layout.add_widget(test)
+    layout.add_widget(back)
+
+    self.smtp.clear_widgets()
+    self.smtp.add_widget(layout)
+
+
+# ---------------------------------------------------------
+# EMAIL THREAD WITH ATTACH + STYLED EXCEL
+# ---------------------------------------------------------
+
+def patched_email_thread(self):
+
+    import smtplib
+    from email.message import EmailMessage
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Border, Side, Alignment
+    from pathlib import Path
+
+    smtp = self.load_smtp()
+
+    if not smtp:
+        Clock.schedule_once(
+            lambda dt: self.popup("Błąd","SMTP nie skonfigurowane")
+        )
+        return
+
+    try:
+
+        server = smtplib.SMTP(
+            smtp["server"],
+            int(smtp["port"]),
+            timeout=30
+        )
+
+        server.starttls()
+        server.login(smtp["user"], smtp["pass"])
+
+    except Exception as e:
+
+        Clock.schedule_once(
+            lambda dt: self.popup("SMTP error", str(e))
+        )
+        return
+
+    rows = self.full_data[1:]
+    header = self.full_data[0]
+
+    folder = Path(self.user_data_dir) / "mail_temp"
+    folder.mkdir(parents=True, exist_ok=True)
+
+    sent = 0
+    errors = 0
+
+    for row in rows:
+
+        email = patched_find_email(self,row)
+
+        if not email:
+            continue
+
+        name = str(row[0]).replace(" ","_")
+
+        file = folder / f"{name}.xlsx"
+
+        wb = Workbook()
+        ws = wb.active
+
+        ws.append(header)
+        ws.append(row)
+
+        # --------- STYLE ---------
+
+        bold = Font(bold=True)
+
+        thin = Side(style="thin")
+
+        border = Border(
+            left=thin,
+            right=thin,
+            top=thin,
+            bottom=thin
+        )
+
+        center = Alignment(horizontal="center")
+
+        # HEADER
+
+        for col in range(1,len(header)+1):
+
+            cell = ws.cell(row=1,column=col)
+
+            cell.font = bold
+            cell.border = border
+            cell.alignment = center
+
+        # DATA
+
+        for col in range(1,len(row)+1):
+
+            cell = ws.cell(row=2,column=col)
+
+            cell.border = border
+            cell.alignment = center
+
+        # AUTOSIZE
+
+        for column in ws.columns:
+
+            max_len = 0
+
+            for cell in column:
+
+                if cell.value:
+                    max_len = max(max_len,len(str(cell.value)))
+
+            ws.column_dimensions[
+                column[0].column_letter
+            ].width = max_len + 4
+
+        wb.save(file)
+
+        msg = EmailMessage()
+
+        msg["Subject"] = "Informacja"
+        msg["From"] = smtp["user"]
+        msg["To"] = email
+
+        msg.set_content(
+            "Wiadomość wygenerowana automatycznie.\n"
+            "W załączniku znajduje się plik Excel."
+        )
+
+        try:
+
+            with open(file,"rb") as f:
+
+                msg.add_attachment(
+                    f.read(),
+                    maintype="application",
+                    subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    filename=file.name
+                )
+
+            server.send_message(msg)
+            sent += 1
+
+        except Exception:
+
+            errors += 1
+
+    server.quit()
+
+    Clock.schedule_once(
+        lambda dt: self.popup(
+            "Email",
+            f"Wysłano {sent}\nBłędy {errors}"
+        )
+    )
+
+
+# ---------------------------------------------------------
+# PATCH CLASS METHODS
+# ---------------------------------------------------------
+
+FutureApp.load_email_excel = patched_load_email_excel
+FutureApp.find_email_for_row = patched_find_email
+FutureApp.test_smtp = patched_test_smtp
+FutureApp.build_smtp = patched_build_smtp
+FutureApp._email_thread = patched_email_thread
+
 # -----------------------------
 # APP START
 # -----------------------------
