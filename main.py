@@ -717,8 +717,6 @@ from ultra_patch import apply_patch
 
 if __name__ == "__main__":
 
-    apply_patch(__import__(__name__)
-
     app = FutureApp()
 
     apply_patch(__import__(__name__), app)
