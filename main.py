@@ -713,6 +713,12 @@ class FutureApp(App):
 # APP START
 # -----------------------------
 
+from ultra_patch import apply_patch
+
 if __name__ == "__main__":
 
-    FutureApp().run()
+    app = FutureApp()
+
+    apply_patch(__import__(__name__), app)
+
+    app.run()
