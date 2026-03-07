@@ -19,7 +19,7 @@ source.include_exts = py,png,jpg,kv,json,txt
 version = 1.0.0
 
 # (list) Application requirements
-requirements = python3,kivy,plyer,openpyxl,et_xmlfile,jdcal,xlrd==1.2.0,pyjnius,reportlab
+requirements = python3,kivy,plyer,openpyxl,et_xmlfile,jdcal,xlrd==1.2.0,pyjnius
 
 # (str) Orientation
 orientation = portrait
