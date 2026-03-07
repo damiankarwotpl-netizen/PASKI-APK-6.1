@@ -114,6 +114,15 @@ class FutureApp(App):
 
         self.home.add_widget(layout)
 
+class FutureApp(App):
+
+    def build(self):
+
+        root = MainLayout()
+
+        apply_email_excel_patch(self)
+
+        return root
 
 # -----------------------------
 # ANDROID PICKER
@@ -707,6 +716,358 @@ class FutureApp(App):
         btn.bind(on_press=popup.dismiss)
 
         popup.open()
+
+
+ # =========================================================
+# EMAIL + EXCEL ULTRA PATCH (SAFE INJECT VERSION)
+# można wkleić na koniec main.py
+# =========================================================
+
+import smtplib
+import threading
+from pathlib import Path
+from datetime import datetime
+from email.message import EmailMessage
+
+from kivy.clock import Clock
+
+from openpyxl import Workbook
+from openpyxl import load_workbook
+from openpyxl.styles import Font, Border, Side
+
+
+# =========================================================
+# HELPER: SAFE METHOD INJECT
+# =========================================================
+
+def _inject(app, name, func, override=True):
+    """
+    Dodaje funkcję do aplikacji.
+    override=True -> nadpisze istniejącą
+    override=False -> tylko jeśli brak
+    """
+
+    if override:
+        setattr(app, name, func)
+    else:
+        if not hasattr(app, name):
+            setattr(app, name, func)
+
+
+# =========================================================
+# AUTO SMTP GOOGLE
+# =========================================================
+
+def auto_fill_gmail_smtp(self):
+
+    if hasattr(self, "smtp_server"):
+        self.smtp_server.text = "smtp.gmail.com"
+
+    if hasattr(self, "smtp_port"):
+        self.smtp_port.text = "587"
+
+
+# =========================================================
+# EXCEL GENERATOR
+# =========================================================
+
+def build_excel_file(header, row, folder):
+
+    bold = Font(bold=True)
+
+    thick = Side(style="thick")
+
+    border = Border(
+        left=thick,
+        right=thick,
+        top=thick,
+        bottom=thick
+    )
+
+    wb = Workbook()
+    ws = wb.active
+
+    ws.append(header)
+    ws.append(row)
+
+    for cell in ws[1]:
+        cell.font = bold
+        cell.border = border
+
+    for r in ws.iter_rows(min_row=2):
+        for cell in r:
+            cell.border = border
+
+    # auto width
+
+    for column_cells in ws.columns:
+
+        length = max(
+            len(str(cell.value)) if cell.value else 0
+            for cell in column_cells
+        )
+
+        ws.column_dimensions[column_cells[0].column_letter].width = length + 4
+
+    name = row[0] if row else "file"
+
+    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    file = folder / f"{name}_{now}.xlsx"
+
+    wb.save(file)
+
+    return file
+
+
+# =========================================================
+# EMAIL EXCEL IMPORT
+# =========================================================
+
+def pro_load_email_excel(self, path):
+
+    wb = load_workbook(path, data_only=True)
+
+    sheet = wb.active
+
+    rows = list(sheet.iter_rows(values_only=True))
+
+    header = [str(x).lower() for x in rows[0]]
+
+    try:
+
+        name_i = header.index("imię")
+        surname_i = header.index("nazwisko")
+        email_i = header.index("email")
+
+    except:
+
+        if hasattr(self, "popup"):
+            self.popup(
+                "Błąd",
+                "Excel musi mieć kolumny:\nImię | Nazwisko | Email"
+            )
+
+        return
+
+    self.email_map = {}
+
+    for row in rows[1:]:
+
+        name = str(row[name_i]).strip()
+        surname = str(row[surname_i]).strip()
+        email = str(row[email_i]).strip()
+
+        key = f"{name} {surname}".lower()
+
+        self.email_map[key] = email
+
+    wb.close()
+
+    if hasattr(self, "popup"):
+        self.popup(
+            "Email",
+            f"Wczytano {len(self.email_map)} adresów"
+        )
+
+
+# =========================================================
+# FIND EMAIL
+# =========================================================
+
+def pro_find_email(self, row):
+
+    if not hasattr(self, "email_map"):
+        return None
+
+    if len(row) < 2:
+        return None
+
+    name = str(row[0]).strip()
+    surname = str(row[1]).strip()
+
+    key = f"{name} {surname}".lower()
+
+    return self.email_map.get(key)
+
+
+# =========================================================
+# SMTP TEST
+# =========================================================
+
+def pro_test_smtp(self, _=None):
+
+    def run():
+
+        try:
+
+            server = smtplib.SMTP(
+                self.smtp_server.text,
+                int(self.smtp_port.text),
+                timeout=20
+            )
+
+            server.starttls()
+
+            server.login(
+                self.smtp_user.text,
+                self.smtp_pass.text
+            )
+
+            server.quit()
+
+            if hasattr(self, "popup"):
+                Clock.schedule_once(
+                    lambda dt: self.popup("SMTP", "Połączenie OK")
+                )
+
+        except Exception as e:
+
+            if hasattr(self, "popup"):
+                Clock.schedule_once(
+                    lambda dt: self.popup("SMTP ERROR", str(e))
+                )
+
+    threading.Thread(target=run).start()
+
+
+# =========================================================
+# EMAIL SENDER
+# =========================================================
+
+def pro_email_thread(self):
+
+    if not hasattr(self, "load_smtp"):
+        return
+
+    smtp = self.load_smtp()
+
+    if not smtp:
+        return
+
+    try:
+
+        server = smtplib.SMTP(
+            smtp["server"],
+            int(smtp["port"])
+        )
+
+        server.starttls()
+
+        server.login(
+            smtp["user"],
+            smtp["pass"]
+        )
+
+    except Exception as e:
+
+        if hasattr(self, "popup"):
+            Clock.schedule_once(
+                lambda dt: self.popup("SMTP", str(e))
+            )
+
+        return
+
+    rows = getattr(self, "full_data", [])[1:]
+
+    folder = Path("/storage/emulated/0/Documents/FutureExport")
+
+    folder.mkdir(parents=True, exist_ok=True)
+
+    header = self.full_data[0]
+
+    sent = 0
+
+    for row in rows:
+
+        email = self.find_email_for_row(row)
+
+        if not email:
+            continue
+
+        try:
+
+            excel_file = build_excel_file(header, row, folder)
+
+            msg = EmailMessage()
+
+            msg["Subject"] = "Informacja"
+            msg["From"] = smtp["user"]
+            msg["To"] = email
+
+            msg.set_content(
+                "W załączniku znajduje się plik Excel z danymi."
+            )
+
+            with open(excel_file, "rb") as f:
+
+                msg.add_attachment(
+                    f.read(),
+                    maintype="application",
+                    subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    filename=excel_file.name
+                )
+
+            server.send_message(msg)
+
+            sent += 1
+
+        except:
+            pass
+
+    server.quit()
+
+    if hasattr(self, "popup"):
+        Clock.schedule_once(
+            lambda dt: self.popup(
+                "Email",
+                f"Wysłano {sent} wiadomości"
+            )
+        )
+
+
+# =========================================================
+# EXCEL EXPORT
+# =========================================================
+
+def ultra_export_excel(self):
+
+    rows = getattr(self, "filtered_data", None)
+
+    if not rows:
+        return
+
+    folder = Path("/storage/emulated/0/Documents/FutureExport")
+
+    folder.mkdir(parents=True, exist_ok=True)
+
+    header = rows[0]
+
+    for row in rows[1:]:
+
+        build_excel_file(header, row, folder)
+
+    if hasattr(self, "popup"):
+        Clock.schedule_once(
+            lambda dt: self.popup("Export", "Zakończony")
+        )
+
+
+# =========================================================
+# PATCH LOADER
+# =========================================================
+
+def apply_email_excel_patch(app, override=True):
+
+    auto_fill_gmail_smtp(app)
+
+    _inject(app, "load_email_excel", pro_load_email_excel, override)
+    _inject(app, "find_email_for_row", pro_find_email, override)
+    _inject(app, "test_smtp", pro_test_smtp, override)
+    _inject(app, "_email_thread", pro_email_thread, override)
+    _inject(app, "export_excel", ultra_export_excel, override)
+
+    print("EMAIL + EXCEL ULTRA PATCH LOADED")   
 
 
 # -----------------------------
