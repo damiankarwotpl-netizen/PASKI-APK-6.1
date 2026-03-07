@@ -18,7 +18,29 @@ jobs:
  
     steps:
       - uses: actions/checkout@v4
- 
+
+      # ---------- OMEGA CHANGE DETECTOR ----------
+
+      - name: Detect source changes
+        id: changes
+        run: |
+          git fetch origin || true
+          CHANGED=$(git diff --name-only HEAD~1 HEAD || true)
+
+          NEED_CLEAN=0
+
+          if echo "$CHANGED" | grep -E "main.py|buildozer.spec|requirements"; then
+            NEED_CLEAN=1
+          fi
+
+          echo "need_clean=$NEED_CLEAN" >> $GITHUB_OUTPUT
+
+      # ---------- VERSION ----------
+
+      - name: Set build version
+        run: |
+          echo "APP_VERSION=1.0.${{ github.run_number }}" >> $GITHUB_ENV
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -30,7 +52,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # ---------- CACHE (NOWE) ----------
+      # ---------- CACHE ----------
 
       - name: Cache Buildozer
         uses: actions/cache@v4
@@ -38,7 +60,7 @@ jobs:
           path: |
             .buildozer
             ~/.buildozer
-          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec','main.py') }}
           restore-keys: |
             buildozer-${{ runner.os }}-
 
@@ -48,17 +70,13 @@ jobs:
           path: |
             ~/.gradle
           key: gradle-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            gradle-${{ runner.os }}-
 
       - name: Cache pip
         uses: actions/cache@v4
         with:
           path: |
             ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            pip-${{ runner.os }}-
+          key: pip-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
 
       - name: Cache Android SDK/NDK
         uses: actions/cache@v4
@@ -66,30 +84,46 @@ jobs:
           path: |
             ~/.buildozer/android/platform
           key: android-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            android-${{ runner.os }}-
 
-      # ---------- INSTALL ----------
-      
-      - name: Clean project
+      # ---------- AUTO CLEAN ----------
+
+      - name: Clean project (AUTO)
+        if: steps.changes.outputs.need_clean == '1'
         run: |
+            echo "Source changed -> cleaning"
             rm -rf .buildozer
             rm -rf bin
             rm -rf ~/.buildozer
+
+      # ---------- SYSTEM INFO ----------
+
+      - name: Collect system info
+        run: |
+          mkdir -p artifacts
+          uname -a > artifacts/system-info.log
+          env > artifacts/environment.log
+
+      # ---------- INSTALL ----------
+
       - name: Install system dependencies
         run: |
           sudo apt update
           sudo apt install -y \
-            zip unzip \
-            autoconf libtool pkg-config \
-            zlib1g-dev libncurses5-dev \
-            libncursesw5-dev libtinfo5 \
-            cmake libffi-dev libssl-dev
+            zip unzip autoconf libtool pkg-config \
+            zlib1g-dev libncurses5-dev libncursesw5-dev \
+            libtinfo5 cmake libffi-dev libssl-dev
 
       - name: Install Buildozer toolchain
         run: |
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install buildozer==1.5.0 cython==0.29.36
+
+      # ---------- OMEGA TURBO BUILD ----------
+
+      - name: Enable turbo compile
+        run: |
+          echo "MAKEFLAGS=-j$(nproc)" >> $GITHUB_ENV
+          echo "GRADLE_OPTS=-Dorg.gradle.parallel=true" >> $GITHUB_ENV
 
       # ---------- SDK INIT ----------
 
@@ -99,40 +133,22 @@ jobs:
           (yes || true) | buildozer android update 2>&1 | tee artifacts/buildozer-update.log
           exit ${PIPESTATUS[1]}
 
-      # ---------- LICENSE ACCEPT ----------
+      # ---------- BUILD ----------
 
-      - name: Accept Android SDK licenses
-        run: |
-          accepted=0
-          for sdk_root in \
-            "$ANDROID_SDK_ROOT" \
-            "$ANDROID_HOME" \
-            "$HOME/.buildozer/android/platform/android-sdk"; do
-            for candidate in \
-              "$sdk_root/cmdline-tools/latest/bin/sdkmanager" \
-              "$sdk_root/cmdline-tools/tools/bin/sdkmanager" \
-              "$sdk_root/tools/bin/sdkmanager"; do
-              if [ -x "$candidate" ]; then
-                yes | "$candidate" --licenses
-                accepted=1
-                break
-              fi
-            done
-            if [ "$accepted" -eq 1 ]; then
-              break
-            fi
-          done
-          if [ "$accepted" -eq 0 ]; then
-            echo "sdkmanager not found; continuing because Buildozer may manage licenses internally."
-          fi
-
-      # ---------- BUILD APK ----------
-
-      - name: Build APK
+      - name: Build APK + AAB
         run: |
           mkdir -p artifacts
           (yes || true) | buildozer android debug 2>&1 | tee artifacts/buildozer.log
-          exit ${PIPESTATUS[1]}
+          (yes || true) | buildozer android release aab 2>&1 | tee -a artifacts/buildozer.log
+
+      # ---------- CRASH REPORT ----------
+
+      - name: Generate crash report
+        if: failure()
+        run: |
+          mkdir -p artifacts
+          echo "BUILD FAILED $(date)" > artifacts/crash-report.log
+          tail -n 200 artifacts/buildozer.log >> artifacts/crash-report.log || true
 
       # ---------- LOGS ----------
 
@@ -140,10 +156,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: buildozer-logs
+          name: build-logs
           path: |
-            artifacts/buildozer-update.log
-            artifacts/buildozer.log
+            artifacts/*
           if-no-files-found: warn
 
       # ---------- APK ----------
@@ -152,6 +167,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: paski-future-1-0-apk
-          path: bin/*.apk
-          if-no-files-found: error
+          name: paski-future-build
+          path: |
+            bin/*.apk
+            bin/*.aab
