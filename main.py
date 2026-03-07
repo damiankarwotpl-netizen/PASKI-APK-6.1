@@ -81,6 +81,8 @@ class FutureApp(App):
         self.sm.add_widget(self.table)
         self.sm.add_widget(self.email)
         self.sm.add_widget(self.smtp)
+        
+        apply_email_excel_patch(self)
 
         return self.sm
 
@@ -113,16 +115,6 @@ class FutureApp(App):
         layout.add_widget(self.status)
 
         self.home.add_widget(layout)
-
-class FutureApp(App):
-
-    def build(self):
-
-        root = MainLayout()
-
-        apply_email_excel_patch(self)
-
-        return root
 
 # -----------------------------
 # ANDROID PICKER
