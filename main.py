@@ -613,7 +613,7 @@ class FutureApp(App):
 # EXPORT THREAD
 # -----------------------------
 
-    def export_excel(self):
+def export_excel(self):
 
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, Border, Side
