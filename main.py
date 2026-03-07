@@ -81,8 +81,6 @@ class FutureApp(App):
         self.sm.add_widget(self.table)
         self.sm.add_widget(self.email)
         self.sm.add_widget(self.smtp)
-
-        Clock.schedule_once(delayed_patch, 2)
         
         return self.sm
 
@@ -709,26 +707,11 @@ class FutureApp(App):
         btn.bind(on_press=popup.dismiss)
 
         popup.open()
-    
-def delayed_patch(dt):
-
-    try:
-
-        FutureApp.build_smtp = patched_build_smtp
-        FutureApp._email_thread = patched_email_thread
-        FutureApp.test_smtp = patched_test_smtp
-
-        print("PATCH LOADED")
-
-    except Exception as e:
-
-        print("PATCH ERROR:", e)
-
 
 
 # =========================================================
-# FUTURE APP SAFE PATCH (SMTP + TEST + PROVIDERS + ATTACH)
-# Wklej na samym końcu pliku main.py
+# FUTURE APP FULL PATCH (SMTP + PROVIDERS + TEST + ATTACH)
+# Wklej NA SAMYM KOŃCU pliku main.py
 # =========================================================
 
 from kivy.uix.spinner import Spinner
@@ -770,7 +753,7 @@ FutureApp.test_smtp = patched_test_smtp
 
 
 # ---------------------------------------------------------
-# SMTP SCREEN PATCH (PROVIDERS + TEST BUTTON)
+# SMTP SCREEN PATCH
 # ---------------------------------------------------------
 
 def patched_build_smtp(self):
@@ -800,7 +783,7 @@ def patched_build_smtp(self):
     self.smtp_user = TextInput(hint_text="Email", multiline=False)
     self.smtp_pass = TextInput(hint_text="Hasło", multiline=False, password=True)
 
-    def set_provider(spinner, text):
+def set_provider(spinner, text):
 
         if text == "Gmail":
 
@@ -857,7 +840,7 @@ FutureApp.build_smtp = patched_build_smtp
 
 
 # ---------------------------------------------------------
-# EMAIL THREAD PATCH (XLSX ATTACHMENT)
+# EMAIL THREAD PATCH (ATTACH XLSX PER ROW)
 # ---------------------------------------------------------
 
 def patched_email_thread(self):
@@ -903,7 +886,6 @@ def patched_email_thread(self):
     col = self.email_columns[0]
 
     rows = self.full_data[1:]
-
     header = self.full_data[0]
 
     total = len(rows)
@@ -924,20 +906,13 @@ def patched_email_thread(self):
         if not email or "@" not in email:
             continue
 
-        msg = EmailMessage()
-
-        msg["Subject"] = "Informacja"
-        msg["From"] = smtp["user"]
-        msg["To"] = email
-
-        msg.set_content("Wiadomość wygenerowana automatycznie")
+        # ---------- GENERUJ EXCEL ----------
 
         name = str(row[0]).replace(" ", "_") if row else "plik"
 
         file = folder / f"{name}.xlsx"
 
         wb = Workbook()
-
         ws = wb.active
 
         ws.append(header)
@@ -950,7 +925,6 @@ def patched_email_thread(self):
             for cell in col_cells:
 
                 if cell.value:
-
                     max_len = max(max_len, len(str(cell.value)))
 
             ws.column_dimensions[
@@ -958,6 +932,21 @@ def patched_email_thread(self):
             ].width = max_len + 4
 
         wb.save(file)
+
+        # ---------- TWÓRZ MAIL ----------
+
+        msg = EmailMessage()
+
+        msg["Subject"] = "Informacja"
+        msg["From"] = smtp["user"]
+        msg["To"] = email
+
+        msg.set_content(
+            "Wiadomość wygenerowana automatycznie.\n"
+            "W załączniku znajduje się plik Excel."
+        )
+
+        # ---------- ZAŁĄCZNIK ----------
 
         try:
 
@@ -971,7 +960,11 @@ def patched_email_thread(self):
                 )
 
         except Exception:
-            pass
+
+            errors += 1
+            continue
+
+        # ---------- WYŚLIJ ----------
 
         try:
 
