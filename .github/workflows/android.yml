@@ -163,6 +163,10 @@ jobs:
 
       # ---------- APK ----------
 
+      - name: Find APK
+        run: |
+            find . -name "*.apk"
+
       - name: Upload APK artifact
         if: success()
         uses: actions/upload-artifact@v4
