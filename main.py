@@ -709,22 +709,20 @@ class FutureApp(App):
         btn.bind(on_press=popup.dismiss)
 
         popup.open()
+    
+def delayed_patch(dt):
 
+    try:
 
-  def delayed_patch(dt):
+        FutureApp.build_smtp = patched_build_smtp
+        FutureApp._email_thread = patched_email_thread
+        FutureApp.test_smtp = patched_test_smtp
 
-        try:
+        print("PATCH LOADED")
 
-            FutureApp.build_smtp = patched_build_smtp
-            FutureApp._email_thread = patched_email_thread
-            FutureApp.test_smtp = patched_test_smtp
+    except Exception as e:
 
-            print("PATCH LOADED")
-
-        except Exception as e:
-
-            print("PATCH ERROR:", e)
-
+        print("PATCH ERROR:", e)
 # -----------------------------
 # APP START
 # -----------------------------
