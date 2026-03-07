@@ -82,6 +82,8 @@ class FutureApp(App):
         self.sm.add_widget(self.email)
         self.sm.add_widget(self.smtp)
 
+        apply_mail_patch(self)
+
         return self.sm
 
 
@@ -708,6 +710,276 @@ class FutureApp(App):
 
         popup.open()
 
+if __name__ == "__main__":
+
+    
+# =====================================================
+# FUTURE MAIL PRO PATCH
+# =====================================================
+
+import sqlite3
+import smtplib
+from email.message import EmailMessage
+from openpyxl import Workbook
+from kivy.clock import Clock
+
+
+# -------------------------
+# DATABASE
+# -------------------------
+
+def init_mail_db(self):
+
+    db = Path(self.user_data_dir) / "mail.db"
+
+    self.mail_db = sqlite3.connect(db)
+
+    cur = self.mail_db.cursor()
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS address_book(
+        id INTEGER PRIMARY KEY,
+        name TEXT,
+        surname TEXT,
+        email TEXT
+    )
+    """)
+
+    self.mail_db.commit()
+
+
+# -------------------------
+# ADD EMAIL
+# -------------------------
+
+def db_add_email(self,name,surname,email):
+
+    cur = self.mail_db.cursor()
+
+    cur.execute(
+        "INSERT INTO address_book(name,surname,email) VALUES(?,?,?)",
+        (name.lower(),surname.lower(),email)
+    )
+
+    self.mail_db.commit()
+
+
+# -------------------------
+# FIND EMAIL
+# -------------------------
+
+def db_find_email(self,name,surname):
+
+    cur = self.mail_db.cursor()
+
+    cur.execute(
+        "SELECT email FROM address_book WHERE name=? AND surname=?",
+        (name.lower(),surname.lower())
+    )
+
+    r = cur.fetchone()
+
+    if r:
+        return r[0]
+
+    return None
+
+
+# -------------------------
+# IMPORT ADDRESS BOOK
+# -------------------------
+
+def import_address_excel(self,path):
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(path,data_only=True)
+
+    sheet = wb.active
+
+    rows = list(sheet.iter_rows(values_only=True))
+
+    header = [str(x).lower() for x in rows[0]]
+
+    name_i = header.index("imię")
+    sur_i = header.index("nazwisko")
+    mail_i = header.index("email")
+
+    added = 0
+
+    for r in rows[1:]:
+
+        name=str(r[name_i])
+        sur=str(r[sur_i])
+        mail=str(r[mail_i])
+
+        if mail:
+
+            db_add_email(self,name,sur,mail)
+
+            added+=1
+
+    wb.close()
+
+    self.popup("Adresy",f"Dodano {added} emaili")
+
+
+# -------------------------
+# FIND EMAIL FOR ROW
+# -------------------------
+
+def find_email_for_row(self,row):
+
+    email=None
+
+    if len(row)>=2:
+
+        email=db_find_email(self,row[0],row[1])
+
+    if not email and self.email_columns:
+
+        col=self.email_columns[0]
+
+        if col<len(row):
+
+            email=row[col]
+
+    return email
+
+
+# -------------------------
+# BUILD EXCEL ATTACHMENT
+# -------------------------
+
+def build_excel_attachment(header,row,folder):
+
+    wb=Workbook()
+
+    ws=wb.active
+
+    ws.append(header)
+
+    ws.append(row)
+
+    name=row[0] if row else "file"
+
+    now=datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    file=folder/f"{name}_{now}.xlsx"
+
+    wb.save(file)
+
+    return file
+
+
+# -------------------------
+# EMAIL THREAD
+# -------------------------
+
+def mail_thread(self):
+
+    smtp=self.load_smtp()
+
+    if not smtp:
+
+        Clock.schedule_once(
+            lambda dt:self.popup("SMTP","Brak konfiguracji")
+        )
+
+        return
+
+    try:
+
+        server=smtplib.SMTP(
+            smtp["server"],
+            int(smtp["port"])
+        )
+
+        server.starttls()
+
+        server.login(
+            smtp["user"],
+            smtp["pass"]
+        )
+
+    except Exception as e:
+
+        Clock.schedule_once(
+            lambda dt:self.popup("SMTP",str(e))
+        )
+
+        return
+
+    header=self.full_data[0]
+
+    rows=self.full_data[1:]
+
+    folder=Path("/storage/emulated/0/Documents/FutureExport")
+
+    folder.mkdir(parents=True,exist_ok=True)
+
+    sent=0
+
+    for row in rows:
+
+        email=find_email_for_row(self,row)
+
+        if not email:
+            continue
+
+        try:
+
+            excel=build_excel_attachment(header,row,folder)
+
+            msg=EmailMessage()
+
+            msg["Subject"]="Informacja"
+
+            msg["From"]=smtp["user"]
+
+            msg["To"]=email
+
+            msg.set_content(
+                "W załączniku plik Excel."
+            )
+
+            with open(excel,"rb") as f:
+
+                msg.add_attachment(
+                    f.read(),
+                    maintype="application",
+                    subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    filename=excel.name
+                )
+
+            server.send_message(msg)
+
+            sent+=1
+
+        except:
+            pass
+
+    server.quit()
+
+    Clock.schedule_once(
+        lambda dt:self.popup(
+            "Email",
+            f"Wysłano {sent} wiadomości"
+        )
+    )
+
+
+# -------------------------
+# PATCH LOADER
+# -------------------------
+
+def apply_mail_patch(app):
+
+    init_mail_db(app)
+
+    app.find_email_for_row=find_email_for_row
+
+    app._email_thread=mail_thread
 
 # -----------------------------
 # APP START
