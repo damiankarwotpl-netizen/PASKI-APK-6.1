@@ -7,7 +7,7 @@ title = Paski Future
 package.name = paskifuture10
 
 # (str) Package domain
-package.domain = org.test
+package.domain = pl.future
 
 # (str) Source code where the main.py lives
 source.dir = .
