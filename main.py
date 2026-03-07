@@ -716,3 +716,203 @@ class FutureApp(App):
 if __name__ == "__main__":
 
     FutureApp().run()
+
+# ======================================
+# FUTURE SMTP FIX + TEST + LOG PATCH
+# ======================================
+
+import socket
+
+
+# -----------------------------
+# SMTP CONNECTION TEST
+# -----------------------------
+
+def future_test_smtp(app):
+
+    smtp = app.load_smtp()
+
+    if not smtp:
+
+        Clock.schedule_once(
+            lambda dt: app.popup("SMTP", "Brak konfiguracji SMTP")
+        )
+
+        return
+
+    try:
+
+        import smtplib
+
+        server = smtplib.SMTP(
+            smtp["server"],
+            int(smtp["port"]),
+            timeout=15
+        )
+
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+
+        server.login(
+            smtp["user"],
+            smtp["pass"]
+        )
+
+        server.quit()
+
+        Clock.schedule_once(
+            lambda dt: app.popup("SMTP", "Połączenie OK")
+        )
+
+    except socket.gaierror:
+
+        Clock.schedule_once(
+            lambda dt: app.popup("SMTP ERROR", "Nie znaleziono serwera SMTP")
+        )
+
+    except Exception as e:
+
+        Clock.schedule_once(
+            lambda dt: app.popup("SMTP ERROR", str(e))
+        )
+
+
+# -----------------------------
+# EMAIL THREAD WITH LOG
+# -----------------------------
+
+def future_email_thread(app):
+
+    import smtplib
+    from email.message import EmailMessage
+
+    smtp = app.load_smtp()
+
+    if not smtp:
+
+        Clock.schedule_once(
+            lambda dt: app.popup("Błąd", "SMTP nie skonfigurowane")
+        )
+
+        return
+
+    log_file = Path("/storage/emulated/0/Documents/Future_mail_log.txt")
+
+    sent = 0
+    errors = 0
+
+    try:
+
+        server = smtplib.SMTP(
+            smtp["server"],
+            int(smtp["port"]),
+            timeout=20
+        )
+
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+
+        server.login(
+            smtp["user"],
+            smtp["pass"]
+        )
+
+    except Exception as e:
+
+        Clock.schedule_once(
+            lambda dt: app.popup("SMTP error", str(e))
+        )
+
+        return
+
+    col = app.email_columns[0]
+
+    rows = app.full_data[1:]
+
+    total = len(rows)
+
+    for i, row in enumerate(rows):
+
+        if col >= len(row):
+            continue
+
+        email = str(row[col]).strip()
+
+        if not email or "@" not in email:
+            continue
+
+        msg = EmailMessage()
+
+        msg["Subject"] = "Informacja"
+        msg["From"] = smtp["user"]
+        msg["To"] = email
+
+        msg.set_content("Wiadomość wygenerowana automatycznie")
+
+        try:
+
+            server.send_message(msg)
+
+            sent += 1
+
+            with open(log_file, "a") as log:
+                log.write(f"OK {email}\n")
+
+        except Exception as e:
+
+            errors += 1
+
+            with open(log_file, "a") as log:
+                log.write(f"ERROR {email} {e}\n")
+
+        progress = int((i + 1) / total * 100)
+
+        Clock.schedule_once(
+            lambda dt, p=progress: setattr(app.progress, "value", p)
+        )
+
+    server.quit()
+
+    Clock.schedule_once(
+        lambda dt: app.popup(
+            "Email",
+            f"Wysłano: {sent}\nBłędy: {errors}\nLog zapisany"
+        )
+    )
+
+
+# -----------------------------
+# OVERRIDE ORIGINAL EMAIL THREAD
+# -----------------------------
+
+FutureApp._email_thread = lambda self: future_email_thread(self)
+
+
+# -----------------------------
+# ADD SMTP TEST BUTTON
+# -----------------------------
+
+def future_add_smtp_test(app):
+
+    btn = PremiumButton(text="Test SMTP")
+
+    btn.bind(
+        on_press=lambda x: threading.Thread(
+            target=lambda: future_test_smtp(app),
+            daemon=True
+        ).start()
+    )
+
+    if app.smtp.children:
+
+        layout = app.smtp.children[0]
+
+        layout.add_widget(btn)
+
+
+Clock.schedule_once(
+    lambda dt: future_add_smtp_test(App.get_running_app()),
+    1
+    )
