@@ -86,6 +86,15 @@ class FutureApp(App):
 
         return self.sm
 
+    def import_address_book(self, _):
+
+        if not self.current_file:
+            self.popup("Błąd", "Najpierw wybierz plik Excel")
+        return
+
+    import_address_excel(self, self.current_file)
+
+            self.popup("OK", "Książka adresowa zaimportowana")
 
 # -----------------------------
 # HOME
@@ -358,6 +367,9 @@ class FutureApp(App):
 
     def build_email(self):
 
+        book_btn = PremiumButton(text="📚 Import książki adresowej")
+        book_btn.bind(on_press=self.import_address_book)
+
         layout = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(15))
 
         title = Label(text="Email Sender", font_size=22)
@@ -374,6 +386,7 @@ class FutureApp(App):
         self.email_status = Label(text="")
 
         layout.add_widget(title)
+        layout.add_widget(book_btn)
         layout.add_widget(select_col)
         layout.add_widget(send_btn)
         layout.add_widget(back)
