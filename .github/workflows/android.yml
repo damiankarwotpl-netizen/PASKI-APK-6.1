@@ -135,11 +135,10 @@ jobs:
 
       # ---------- BUILD ----------
 
-      - name: Build APK + AAB
+      - name: Build APK
         run: |
           mkdir -p artifacts
           (yes || true) | buildozer android debug 2>&1 | tee artifacts/buildozer.log
-          (yes || true) | buildozer android release aab 2>&1 | tee -a artifacts/buildozer.log
 
       # ---------- CRASH REPORT ----------
 
