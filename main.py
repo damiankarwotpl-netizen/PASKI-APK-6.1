@@ -707,6 +707,451 @@ class FutureApp(App):
         btn.bind(on_press=popup.dismiss)
 
         popup.open()
+# =========================================================
+# FUTURE MAIL ULTRA PATCH (EMAIL + UI + SMTP + EXCEL STYLE)
+# WKLEJ PRZED  if __name__ == "__main__":
+# =========================================================
+
+from kivy.metrics import dp
+from kivy.clock import Clock
+from kivy.graphics import Color, RoundedRectangle
+from kivy.uix.filechooser import FileChooserListView
+from kivy.uix.spinner import Spinner
+from kivy.uix.popup import Popup
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.label import Label
+from kivy.uix.textinput import TextInput
+from kivy.uix.button import Button
+
+import threading
+
+
+# ---------------------------------------------------------
+# NOWE UI BUTTON
+# ---------------------------------------------------------
+
+class PremiumButton(Button):
+
+    def __init__(self, **kwargs):
+
+        super().__init__(**kwargs)
+
+        self.size_hint_y = None
+        self.height = dp(60)
+
+        self.font_size = 18
+
+        self.background_normal = ""
+        self.background_color = (0,0,0,0)
+
+        with self.canvas.before:
+
+            Color(0.15,0.45,0.9,1)
+
+            self.rect = RoundedRectangle(
+                radius=[18],
+                pos=self.pos,
+                size=self.size
+            )
+
+        self.bind(pos=self.update_rect)
+        self.bind(size=self.update_rect)
+
+    def update_rect(self,*args):
+
+        self.rect.pos = self.pos
+        self.rect.size = self.size
+
+
+# ---------------------------------------------------------
+# INPUT MOBILE
+# ---------------------------------------------------------
+
+class PremiumInput(TextInput):
+
+    def __init__(self,**kwargs):
+
+        super().__init__(**kwargs)
+
+        self.size_hint_y = None
+        self.height = dp(55)
+
+        self.font_size = 18
+
+        self.padding = [dp(12),dp(12)]
+
+        self.background_normal = ""
+        self.background_active = ""
+
+        self.background_color = (.95,.95,.95,1)
+
+
+# ---------------------------------------------------------
+# POPUP WYBORU PLIKU EMAIL
+# ---------------------------------------------------------
+
+def load_email_list_popup(self):
+
+    chooser = FileChooserListView(filters=["*.xlsx"])
+
+    layout = BoxLayout(orientation="vertical")
+
+    btn = PremiumButton(text="Wczytaj plik")
+
+    popup = Popup(
+        title="Wybierz plik z emailami",
+        content=layout,
+        size_hint=(0.9,0.9)
+    )
+
+    def load_file(_):
+
+        if not chooser.selection:
+            return
+
+        path = chooser.selection[0]
+
+        self.load_email_excel(path)
+
+        popup.dismiss()
+
+    btn.bind(on_press=load_file)
+
+    layout.add_widget(chooser)
+    layout.add_widget(btn)
+
+    popup.open()
+
+
+# ---------------------------------------------------------
+# WCZYTANIE EXCELA EMAIL
+# ---------------------------------------------------------
+
+def patched_load_email_excel(self,path):
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(path,data_only=True)
+
+    sheet = wb.active
+
+    rows = list(sheet.iter_rows(values_only=True))
+
+    header = [str(x).lower() for x in rows[0]]
+
+    try:
+
+        name_i = header.index("imię")
+        surname_i = header.index("nazwisko")
+        email_i = header.index("email")
+
+    except:
+
+        self.popup(
+            "Błąd",
+            "Excel musi mieć kolumny:\nImię | Nazwisko | Email"
+        )
+        return
+
+    self.email_map = {}
+
+    for row in rows[1:]:
+
+        name = str(row[name_i]).strip()
+        surname = str(row[surname_i]).strip()
+        email = str(row[email_i]).strip()
+
+        key = f"{name} {surname}".lower()
+
+        self.email_map[key] = email
+
+    wb.close()
+
+    self.popup(
+        "Email",
+        f"Wczytano {len(self.email_map)} adresów"
+    )
+
+
+# ---------------------------------------------------------
+# ZNAJDOWANIE EMAILA
+# ---------------------------------------------------------
+
+def patched_find_email(self,row):
+
+    if not hasattr(self,"email_map"):
+        return None
+
+    name = str(row[0]).strip()
+    surname = str(row[1]).strip()
+
+    key = f"{name} {surname}".lower()
+
+    return self.email_map.get(key)
+
+
+# ---------------------------------------------------------
+# SMTP TEST (THREAD)
+# ---------------------------------------------------------
+
+def patched_test_smtp(self,_):
+
+    import smtplib
+
+    def run():
+
+        try:
+
+            server = smtplib.SMTP(
+                self.smtp_server.text,
+                int(self.smtp_port.text),
+                timeout=20
+            )
+
+            server.starttls()
+
+            server.login(
+                self.smtp_user.text,
+                self.smtp_pass.text
+            )
+
+            server.quit()
+
+            Clock.schedule_once(
+                lambda dt:self.popup("SMTP","Połączenie OK")
+            )
+
+        except Exception as e:
+
+            Clock.schedule_once(
+                lambda dt:self.popup("SMTP ERROR",str(e))
+            )
+
+    threading.Thread(target=run).start()
+
+
+# ---------------------------------------------------------
+# SMTP SCREEN LEPSZE UI
+# ---------------------------------------------------------
+
+def patched_build_smtp(self):
+
+    layout = BoxLayout(
+        orientation="vertical",
+        padding=dp(20),
+        spacing=dp(12)
+    )
+
+    title = Label(
+        text="SMTP konfiguracja",
+        font_size=24,
+        size_hint_y=None,
+        height=dp(50)
+    )
+
+    provider = Spinner(
+        text="Wybierz provider",
+        values=("Gmail","Outlook","WP","Onet","Interia","Własny"),
+        size_hint_y=None,
+        height=dp(55)
+    )
+
+    self.smtp_server = PremiumInput(hint_text="SMTP server")
+    self.smtp_port = PremiumInput(hint_text="Port")
+    self.smtp_user = PremiumInput(hint_text="Email")
+    self.smtp_pass = PremiumInput(hint_text="Hasło",password=True)
+
+    def set_provider(spinner,text):
+
+        if text == "Gmail":
+
+            self.smtp_server.text = "smtp.gmail.com"
+            self.smtp_port.text = "587"
+
+        elif text == "Outlook":
+
+            self.smtp_server.text = "smtp.office365.com"
+            self.smtp_port.text = "587"
+
+    provider.bind(text=set_provider)
+
+    save = PremiumButton(text="Zapisz SMTP")
+    save.bind(on_press=self.save_smtp)
+
+    test = PremiumButton(text="Test SMTP")
+    test.bind(on_press=self.test_smtp)
+
+    back = PremiumButton(text="Powrót")
+    back.bind(on_press=lambda x:setattr(self.sm,"current","home"))
+
+    layout.add_widget(title)
+    layout.add_widget(provider)
+
+    layout.add_widget(self.smtp_server)
+    layout.add_widget(self.smtp_port)
+    layout.add_widget(self.smtp_user)
+    layout.add_widget(self.smtp_pass)
+
+    layout.add_widget(save)
+    layout.add_widget(test)
+    layout.add_widget(back)
+
+    self.smtp.clear_widgets()
+    self.smtp.add_widget(layout)
+
+
+# ---------------------------------------------------------
+# EMAIL THREAD + EXCEL STYLE
+# ---------------------------------------------------------
+
+def patched_email_thread(self):
+
+    import smtplib
+    from email.message import EmailMessage
+    from openpyxl import Workbook
+    from openpyxl.styles import Font,Border,Side,Alignment
+    from pathlib import Path
+
+    smtp = self.load_smtp()
+
+    if not smtp:
+        return
+
+    try:
+
+        server = smtplib.SMTP(
+            smtp["server"],
+            int(smtp["port"])
+        )
+
+        server.starttls()
+
+        server.login(
+            smtp["user"],
+            smtp["pass"]
+        )
+
+    except Exception as e:
+
+        Clock.schedule_once(
+            lambda dt:self.popup("SMTP",str(e))
+        )
+
+        return
+
+    rows = self.full_data[1:]
+    header = self.full_data[0]
+
+    folder = Path(self.user_data_dir)/"mail_temp"
+    folder.mkdir(exist_ok=True)
+
+    thick = Side(style="medium")
+
+    border = Border(
+        left=thick,right=thick,
+        top=thick,bottom=thick
+    )
+
+    bold = Font(bold=True)
+
+    center = Alignment(horizontal="center")
+
+    sent = 0
+
+    for row in rows:
+
+        email = patched_find_email(self,row)
+
+        if not email:
+            continue
+
+        name = str(row[0]).strip()
+        surname = str(row[1]).strip()
+
+        file = folder / f"{name}_{surname}.xlsx"
+
+        wb = Workbook()
+        ws = wb.active
+
+        ws.append(header)
+        ws.append(row)
+
+        for col in range(1,len(header)+1):
+
+            c = ws.cell(row=1,column=col)
+
+            c.font = bold
+            c.border = border
+            c.alignment = center
+
+        for col in range(1,len(row)+1):
+
+            c = ws.cell(row=2,column=col)
+
+            c.border = border
+            c.alignment = center
+
+        for column in ws.columns:
+
+            max_len = 0
+
+            for cell in column:
+
+                if cell.value:
+                    max_len = max(max_len,len(str(cell.value)))
+
+            ws.column_dimensions[
+                column[0].column_letter
+            ].width = max_len + 6
+
+        wb.save(file)
+
+        msg = EmailMessage()
+
+        msg["Subject"] = "Informacja"
+        msg["From"] = smtp["user"]
+        msg["To"] = email
+
+        msg.set_content(
+            "Automatyczna wiadomość.\n"
+            "Plik Excel w załączniku."
+        )
+
+        with open(file,"rb") as f:
+
+            msg.add_attachment(
+                f.read(),
+                maintype="application",
+                subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                filename=file.name
+            )
+
+        try:
+            server.send_message(msg)
+            sent += 1
+        except:
+            pass
+
+    server.quit()
+
+    Clock.schedule_once(
+        lambda dt:self.popup(
+            "Email",
+            f"Wysłano {sent} wiadomości"
+        )
+    )
+
+
+# ---------------------------------------------------------
+# NADPISANIE METOD
+# ---------------------------------------------------------
+
+FutureApp.load_email_list_popup = load_email_list_popup
+FutureApp.load_email_excel = patched_load_email_excel
+FutureApp.find_email_for_row = patched_find_email
+FutureApp.test_smtp = patched_test_smtp
+FutureApp.build_smtp = patched_build_smtp
+FutureApp._email_thread = patched_email_thread
 
 
 # -----------------------------
