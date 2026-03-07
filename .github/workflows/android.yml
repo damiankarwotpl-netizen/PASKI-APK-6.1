@@ -70,7 +70,12 @@ jobs:
             android-${{ runner.os }}-
 
       # ---------- INSTALL ----------
-
+      
+      - name: Clean project
+        run: |
+            rm -rf .buildozer
+            rm -rf bin
+            rm -rf ~/.buildozer
       - name: Install system dependencies
         run: |
           sudo apt update
