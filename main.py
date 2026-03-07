@@ -350,7 +350,8 @@ class FutureApp(App):
         popup = Popup(title="Wybierz kolumny", content=box, size_hint=(0.9, 0.9))
 
         popup.open()
-        # -----------------------------
+        
+# -----------------------------
 # EMAIL SCREEN
 # -----------------------------
 
@@ -676,6 +677,7 @@ class FutureApp(App):
             row = [row[i] for i in self.export_columns]
 
         ws.append(row)
+        future_excel_format(ws)
 
         # ========================
         # RAMKI KOMÓREK
@@ -716,8 +718,8 @@ class FutureApp(App):
 
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        file = folder / f"{name}_{now}.xlsx"
-
+        file = folder / future_filename(row)
+        
         wb.save(file)
 
         percent = int((i + 1) / total * 100)
@@ -759,7 +761,71 @@ class FutureApp(App):
 
         popup.open()
 
+# -----------------------------
+# FUTURE 11 ULTIMATE
+# -----------------------------
 
+def future_excel_format(ws):
+
+    from openpyxl.styles import Font, Border, Side, Alignment
+
+    thin = Side(style="thin")
+
+    border = Border(
+        left=thin,
+        right=thin,
+        top=thin,
+        bottom=thin
+    )
+
+    # nagłówek
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center")
+
+    # ramki
+    for row in ws.iter_rows():
+        for cell in row:
+            cell.border = border
+
+    # auto szerokość
+    for col in ws.columns:
+
+        length = 0
+
+        for cell in col:
+
+            if cell.value:
+
+                length = max(
+                    length,
+                    len(str(cell.value))
+                )
+
+        ws.column_dimensions[
+            col[0].column_letter
+        ].width = length + 4
+
+
+def future_filename(row):
+
+    from datetime import datetime
+
+    first = "Name"
+    last = "Surname"
+
+    if len(row) > 0:
+        first = str(row[0])
+
+    if len(row) > 1:
+        last = str(row[1])
+
+    first = first.replace(" ", "_")
+    last = last.replace(" ", "_")
+
+    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    return f"{first}_{last}_{now}.xlsx"
 # -----------------------------
 # APP START
 # -----------------------------
