@@ -723,13 +723,7 @@ def delayed_patch(dt):
     except Exception as e:
 
         print("PATCH ERROR:", e)
-# -----------------------------
-# APP START
-# -----------------------------
 
-if __name__ == "__main__":
-
-    FutureApp().run()
 
 
 # =========================================================
@@ -1006,3 +1000,12 @@ def patched_email_thread(self):
 
 
 FutureApp._email_thread = patched_email_thread
+
+# -----------------------------
+# APP START
+# -----------------------------
+
+if __name__ == "__main__":
+
+    FutureApp().run()
+
