@@ -82,6 +82,8 @@ class FutureApp(App):
         self.sm.add_widget(self.email)
         self.sm.add_widget(self.smtp)
 
+        Clock.schedule_once(delayed_patch, 2)
+        
         return self.sm
 
 
@@ -708,6 +710,20 @@ class FutureApp(App):
 
         popup.open()
 
+
+  def delayed_patch(dt):
+
+        try:
+
+            FutureApp.build_smtp = patched_build_smtp
+            FutureApp._email_thread = patched_email_thread
+            FutureApp.test_smtp = patched_test_smtp
+
+            print("PATCH LOADED")
+
+        except Exception as e:
+
+            print("PATCH ERROR:", e)
 
 # -----------------------------
 # APP START
