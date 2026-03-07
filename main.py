@@ -717,17 +717,13 @@ if __name__ == "__main__":
 
     FutureApp().run()
 
-# ===============================
-# FUTURE OMEGA EXTENSIONS PACK
-# (Future 11 + 12 + 13 + 14)
-# ===============================
+# ======================================
+# OMEGA ANDROID FINAL PATCH
+# (Future 11 + 12 + 13 + 14 safe)
+# ======================================
 
 import csv
-import smtplib
-from decimal import Decimal
-from email.message import EmailMessage
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
+import re
 
 
 # -----------------------------
@@ -736,73 +732,40 @@ from reportlab.pdfgen import canvas
 
 def future_safe_filename(name):
 
-    bad = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+    if not name:
+        return "file"
 
-    for b in bad:
-        name = name.replace(b, "")
+    name = str(name)
 
-    return name.strip()
+    name = re.sub(r'[\\/:*?"<>|]', "", name)
 
-
-# -----------------------------
-# DECIMAL FIX
-# -----------------------------
-
-def future_fix_decimal(data):
-
-    fixed = []
-
-    for row in data:
-
-        new_row = []
-
-        for v in row:
-
-            if isinstance(v, Decimal):
-                new_row.append(float(v))
-            else:
-                new_row.append(v)
-
-        fixed.append(new_row)
-
-    return fixed
+    return name.strip()[:40]
 
 
 # -----------------------------
-# ERROR LOG
+# EXPORT FOLDER
 # -----------------------------
 
-def future_log_error(error):
+def future_export_folder():
 
-    try:
+    folder = Path("/storage/emulated/0/Documents/FutureExport")
 
-        folder = Path("/storage/emulated/0/Download/FutureLogs")
-        folder.mkdir(parents=True, exist_ok=True)
+    folder.mkdir(parents=True, exist_ok=True)
 
-        file = folder / "future_error_log.txt"
-
-        with open(file, "a") as f:
-
-            f.write(f"{datetime.now()} : {str(error)}\n")
-
-    except:
-        pass
+    return folder
 
 
 # -----------------------------
-# CSV EXPORT
+# FAST CSV EXPORT
 # -----------------------------
 
 def future_export_csv(app):
 
     try:
 
-        folder = Path("/storage/emulated/0/Download/FutureExport")
-        folder.mkdir(parents=True, exist_ok=True)
+        folder = future_export_folder()
 
-        name = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        file = folder / f"future_export_{name}.csv"
+        file = folder / f"future_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
 
         with open(file, "w", newline="", encoding="utf-8") as f:
 
@@ -817,11 +780,11 @@ def future_export_csv(app):
 
     except Exception as e:
 
-        future_log_error(e)
+        print("CSV error:", e)
 
 
 # -----------------------------
-# EXPORT SINGLE EXCEL
+# SINGLE EXCEL EXPORT
 # -----------------------------
 
 def future_export_single_excel(app):
@@ -829,22 +792,14 @@ def future_export_single_excel(app):
     try:
 
         from openpyxl import Workbook
-        from openpyxl.styles import Font
 
-        folder = Path("/storage/emulated/0/Download/FutureExport")
-        folder.mkdir(parents=True, exist_ok=True)
+        folder = future_export_folder()
 
         wb = Workbook()
         ws = wb.active
 
-        header = app.filtered_data[0]
+        for row in app.filtered_data:
 
-        ws.append(header)
-
-        for c in ws[1]:
-            c.font = Font(bold=True)
-
-        for row in app.filtered_data[1:]:
             ws.append(row)
 
         file = folder / f"future_all_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
@@ -852,100 +807,83 @@ def future_export_single_excel(app):
         wb.save(file)
 
         Clock.schedule_once(
-            lambda dt: app.popup("Excel Export", "Jeden plik zapisany")
+            lambda dt: app.popup("Excel Export", "Plik zapisany")
         )
 
     except Exception as e:
 
-        future_log_error(e)
+        print("Excel error:", e)
 
 
 # -----------------------------
-# EMAIL WITH ATTACHMENT
+# SIMPLE PDF EXPORT
 # -----------------------------
 
-def future_send_email(
-    smtp_server,
-    port,
-    login,
-    password,
-    to_email,
-    subject,
-    body,
-    attachment
-):
+def future_export_pdf(app):
 
     try:
 
-        msg = EmailMessage()
+        folder = future_export_folder()
 
-        msg["From"] = login
-        msg["To"] = to_email
-        msg["Subject"] = subject
+        file = folder / f"future_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
 
-        msg.set_content(body)
+        with open(file, "w", encoding="utf-8") as f:
 
-        if attachment:
+            for row in app.filtered_data:
 
-            with open(attachment, "rb") as f:
-                data = f.read()
+                line = " | ".join([str(v) for v in row])
 
-            msg.add_attachment(
-                data,
-                maintype="application",
-                subtype="octet-stream",
-                filename=os.path.basename(attachment)
-            )
+                f.write(line + "\n")
 
-        with smtplib.SMTP_SSL(smtp_server, port) as smtp:
-
-            smtp.login(login, password)
-            smtp.send_message(msg)
+        Clock.schedule_once(
+            lambda dt: app.popup("PDF Export", "Plik zapisany")
+        )
 
     except Exception as e:
 
-        future_log_error(e)
+        print("PDF error:", e)
 
 
 # -----------------------------
-# FAST CACHE SEARCH
+# CACHE SEARCH ENGINE
 # -----------------------------
 
 class FutureCache:
 
     def __init__(self):
-        self.data = None
+
         self.index = {}
+        self.data = []
 
-    def build_index(self, data):
 
+    def build(self, data):
+
+        self.index = {}
         self.data = data
-        self.index = {}
 
-        for r, row in enumerate(data):
+        for i, row in enumerate(data):
 
-            for value in row:
+            for cell in row:
 
-                if value is None:
+                if not cell:
                     continue
 
-                key = str(value).lower()
+                key = str(cell).lower()
 
                 if key not in self.index:
                     self.index[key] = []
 
-                self.index[key].append(r)
+                self.index[key].append(i)
+
 
     def search(self, text):
 
-        if not text:
-            return self.data
+        text = text.lower()
 
-        key = text.lower()
+        if text not in self.index:
+            return []
 
-        rows = self.index.get(key, [])
-
-        return [self.data[i] for i in rows]
+        return [self.data[i] for i in self.index[text]]
 
 
 future_cache = FutureCache()
@@ -959,22 +897,20 @@ def future_fast_filter(app, text):
 
     try:
 
-        result = future_cache.search(text)
+        rows = future_cache.search(text)
 
-        if result:
-            app.filtered_data = result
-        else:
-            app.filtered_data = app.full_data
+        if rows:
+            app.filtered_data = rows
 
         app.show_table()
 
     except Exception as e:
 
-        future_log_error(e)
+        print("Filter error:", e)
 
 
 # -----------------------------
-# SORT COLUMN
+# COLUMN SORT
 # -----------------------------
 
 def future_sort_column(app, column):
@@ -982,9 +918,12 @@ def future_sort_column(app, column):
     try:
 
         header = app.filtered_data[0]
+
         rows = app.filtered_data[1:]
 
-        rows.sort(key=lambda x: str(x[column]) if column < len(x) else "")
+        rows.sort(
+            key=lambda x: str(x[column]) if column < len(x) else ""
+        )
 
         app.filtered_data = [header] + rows
 
@@ -992,77 +931,7 @@ def future_sort_column(app, column):
 
     except Exception as e:
 
-        future_log_error(e)
-
-
-# -----------------------------
-# FILTER COLUMN
-# -----------------------------
-
-def future_filter_column(app, column, value):
-
-    try:
-
-        header = app.full_data[0]
-
-        result = [header]
-
-        for row in app.full_data[1:]:
-
-            if column < len(row):
-
-                if value.lower() in str(row[column]).lower():
-
-                    result.append(row)
-
-        app.filtered_data = result
-
-        app.show_table()
-
-    except Exception as e:
-
-        future_log_error(e)
-
-
-# -----------------------------
-# PDF EXPORT
-# -----------------------------
-
-def future_export_pdf(app):
-
-    try:
-
-        folder = Path("/storage/emulated/0/Download/FutureExport")
-        folder.mkdir(parents=True, exist_ok=True)
-
-        file = folder / f"future_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-
-        c = canvas.Canvas(str(file), pagesize=letter)
-
-        y = 750
-
-        for row in app.filtered_data:
-
-            line = " | ".join([str(v) for v in row])
-
-            c.drawString(40, y, line)
-
-            y -= 20
-
-            if y < 40:
-
-                c.showPage()
-                y = 750
-
-        c.save()
-
-        Clock.schedule_once(
-            lambda dt: app.popup("PDF Export", "Plik zapisany")
-        )
-
-    except Exception as e:
-
-        future_log_error(e)
+        print("Sort error:", e)
 
 
 # -----------------------------
@@ -1071,36 +940,26 @@ def future_export_pdf(app):
 
 def future_multi_export(app):
 
-    try:
+    threading.Thread(
+        target=future_export_csv,
+        args=(app,),
+        daemon=True
+    ).start()
 
-        threading.Thread(
-            target=future_export_single_excel,
-            args=(app,),
-            daemon=True
-        ).start()
-
-        threading.Thread(
-            target=future_export_csv,
-            args=(app,),
-            daemon=True
-        ).start()
-
-    except Exception as e:
-
-        future_log_error(e)
+    threading.Thread(
+        target=future_export_single_excel,
+        args=(app,),
+        daemon=True
+    ).start()
 
 
 # -----------------------------
-# BIG DATA OPTIMIZER
+# BIG DATA LIMIT (ANDROID SAFE)
 # -----------------------------
 
-def future_bigdata_optimize(app):
+def future_bigdata_guard(app):
 
-    try:
+    if len(app.filtered_data) > 200000:
 
-        if len(app.full_data) > 100000:
-            app.filtered_data = app.full_data[:100000]
-
-    except Exception as e:
-
-        future_log_error(e)
+        app.filtered_data = app.filtered_data[:200000]
+    
