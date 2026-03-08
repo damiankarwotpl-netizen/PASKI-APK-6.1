@@ -503,6 +503,115 @@ def _log_read_attempt(path, note=""):
 # KONIEC PATCHA
 # -------------------------
 
+# -------------------------
+# TABLE CRASH FIX PATCH
+# -------------------------
+
+def _safe_draw_table(self, data):
+
+    try:
+        self.grid.clear_widgets()
+        self.grid.cols = 4
+    except:
+        return
+
+    if not data or len(data) < 2:
+        return
+
+    rows = data[1:100]
+
+    for r in rows:
+
+        # zabezpieczenie długości wiersza
+        row = list(r)
+        while len(row) < 3:
+            row.append("")
+
+        # komórki
+        for cell in row[:3]:
+            try:
+                txt = "" if cell is None else str(cell)
+            except:
+                txt = ""
+            self.grid.add_widget(
+                Label(
+                    text=txt[:12],
+                    font_size=11,
+                    size_hint_y=None,
+                    height=dp(42)
+                )
+            )
+
+        # przycisk eksportu
+        try:
+            btn = Button(
+                text="EKSPORT",
+                size_hint=(None, None),
+                size=(dp(80), dp(42)),
+                background_color=(0, 0.6, 0.2, 1)
+            )
+
+            def _export(instance, row_data=row):
+                try:
+                    self.single_export(row_data)
+                except Exception as e:
+                    self.msg("Błąd eksportu", str(e))
+
+            btn.bind(on_press=_export)
+
+            self.grid.add_widget(btn)
+
+        except Exception as e:
+            print("BTN ERROR", e)
+
+
+FutureApp.draw_table = _safe_draw_table
+
+# -------------------------
+# SAFE TABLE LOADER
+# -------------------------
+
+def _safe_go_to_table(self, _):
+
+    if not self.current_file:
+        self.msg("Błąd", "Najpierw wczytaj Excel.")
+        return
+
+    from openpyxl import load_workbook
+
+    try:
+
+        wb = load_workbook(str(self.current_file), data_only=True)
+        ws = wb.active
+
+        rows = list(ws.iter_rows(values_only=True))
+
+        if not rows:
+            self.msg("Błąd", "Excel jest pusty.")
+            return
+
+        # zamiana na stringi
+        self.full_data = []
+
+        for r in rows:
+            rr = []
+            for v in r:
+                rr.append("" if v is None else str(v))
+            self.full_data.append(rr)
+
+        self.draw_table(self.full_data)
+        self.sm.current = "table"
+
+    except Exception as e:
+        self.msg("Błąd Excela", str(e))
+
+
+FutureApp.go_to_table = _safe_go_to_table
+
+# -------------------------
+# END PATCH
+# -------------------------
+
 if __name__ == "__main__":
     try:
         FutureApp().run()
