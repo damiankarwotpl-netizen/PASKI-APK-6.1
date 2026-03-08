@@ -279,5 +279,249 @@ class FutureApp(App):
         if p.exists():
             d = json.load(open(p)); self.s_user.text = d['u']; self.s_pass.text = d['p']
 
+# =========================================================
+# FUTURE 9.0 ULTRA PRO – ULTRA FIX PATCH
+# Android Excel + Mailing stability fix
+# =========================================================
+
+def _future_ultra_patch():
+
+    from pathlib import Path
+    from kivy.utils import platform
+    from kivy.clock import Clock
+
+    # -----------------------------------------------------
+    # SAFE FILE PICKER (fix corrupted excel)
+    # -----------------------------------------------------
+
+    def open_picker_safe(self, mode):
+
+        if platform != "android":
+            self.msg("Błąd", "Funkcja działa tylko na Android")
+            return
+
+        from jnius import autoclass
+        from android import activity
+
+        Intent = autoclass("android.content.Intent")
+
+        intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+        intent.setType("*/*")
+        intent.addCategory(Intent.CATEGORY_OPENABLE)
+
+        def on_result(req, res, data):
+
+            if data:
+
+                try:
+
+                    uri = data.getData()
+
+                    resolver = autoclass(
+                        "org.kivy.android.PythonActivity"
+                    ).mActivity.getContentResolver()
+
+                    stream = resolver.openInputStream(uri)
+
+                    fname = "data_v9.xlsx" if mode == "data" else "book_v9.xlsx"
+                    local = Path(self.user_data_dir) / fname
+
+                    with open(local, "wb") as f:
+
+                        buf = bytearray(8192)
+
+                        while True:
+                            r = stream.read(buf)
+                            if r == -1 or r == 0:
+                                break
+                            f.write(buf[:r])
+
+                    stream.close()
+
+                    if not local.exists() or local.stat().st_size < 1000:
+                        self.msg("Błąd", "Plik Excel jest uszkodzony")
+                        return
+
+                    if mode == "data":
+                        self.current_file = local
+                        Clock.schedule_once(lambda dt:
+                            setattr(self.home_status, "text", "Plik danych wczytany"))
+                    else:
+                        self.import_contacts_to_db(local)
+
+                except Exception as e:
+
+                    Clock.schedule_once(lambda dt:
+                        self.msg("Błąd pliku", str(e)))
+
+            activity.unbind(on_activity_result=on_result)
+
+        activity.bind(on_activity_result=on_result)
+
+        autoclass(
+            "org.kivy.android.PythonActivity"
+        ).mActivity.startActivityForResult(intent, 999)
+
+
+    # -----------------------------------------------------
+    # SAFE GO TO TABLE (fix excel crash)
+    # -----------------------------------------------------
+
+    def go_to_table_safe(self, _):
+
+        from openpyxl import load_workbook
+
+        if not self.current_file:
+            self.msg("Błąd", "Najpierw wczytaj plik")
+            return
+
+        try:
+
+            if not Path(self.current_file).exists():
+                self.msg("Błąd", "Plik nie istnieje")
+                return
+
+            wb = load_workbook(str(self.current_file), data_only=True)
+            ws = wb.active
+
+            self.full_data = [
+                ["" if v is None else str(v) for v in r]
+                for r in ws.iter_rows(values_only=True)
+            ]
+
+            self.filtered_data = self.full_data
+
+            self.show_table()
+
+            self.sm.current = "table"
+
+        except Exception as e:
+
+            self.msg("Błąd Excel", str(e))
+
+
+    # -----------------------------------------------------
+    # SAFE TEMP FILE FOR MAIL
+    # -----------------------------------------------------
+
+    def create_temp_excel(self, header, row):
+
+        from openpyxl import Workbook
+
+        tmp = Path(self.user_data_dir) / "temp_mail.xlsx"
+
+        wb = Workbook()
+        ws = wb.active
+
+        ws.append(header)
+        ws.append(row)
+
+        wb.save(str(tmp))
+
+        return tmp
+
+
+    # -----------------------------------------------------
+    # SAFE MAILING PATCH
+    # -----------------------------------------------------
+
+    def mailing_safe(self):
+
+        import smtplib
+        import json
+        from email.message import EmailMessage
+
+        conf_path = Path(self.user_data_dir) / "config.json"
+
+        if not conf_path.exists():
+            Clock.schedule_once(lambda dt:
+                self.msg("Błąd", "Brak konfiguracji SMTP"))
+            return
+
+        conf = json.load(open(conf_path))
+
+        try:
+
+            srv = smtplib.SMTP("smtp.gmail.com", 587, timeout=20)
+            srv.starttls()
+            srv.login(conf["u"], conf["p"])
+
+        except Exception as e:
+
+            Clock.schedule_once(lambda dt:
+                self.msg("SMTP ERROR", str(e)))
+            return
+
+        header = self.full_data[0]
+        rows = self.full_data[1:]
+
+        sent = 0
+
+        for i, r in enumerate(rows):
+
+            try:
+
+                name = str(r[0]).lower().strip()
+                sur = str(r[1]).lower().strip()
+
+                res = self.conn.execute(
+                    "SELECT email FROM contacts WHERE name=? AND surname=?",
+                    (name, sur)
+                ).fetchone()
+
+                if not res:
+                    continue
+
+                email = res[0]
+
+                temp_file = self.create_temp_excel(header, r)
+
+                msg = EmailMessage()
+
+                msg["Subject"] = "Raport Future"
+                msg["From"] = conf["u"]
+                msg["To"] = email
+
+                msg.set_content("W załączniku raport.")
+
+                with open(temp_file, "rb") as f:
+                    msg.add_attachment(
+                        f.read(),
+                        maintype="application",
+                        subtype="xlsx",
+                        filename="Raport.xlsx"
+                    )
+
+                srv.send_message(msg)
+
+                sent += 1
+
+            except:
+                pass
+
+            Clock.schedule_once(
+                lambda dt, p=int((i+1)/len(rows)*100):
+                setattr(self.progress, "value", p)
+            )
+
+        srv.quit()
+
+        Clock.schedule_once(
+            lambda dt: self.msg("Koniec", f"Wysłano {sent} maili")
+        )
+
+
+    # -----------------------------------------------------
+    # PATCH METHODS
+    # -----------------------------------------------------
+
+    FutureApp.open_picker = open_picker_safe
+    FutureApp.go_to_table = go_to_table_safe
+    FutureApp._mailing_process = mailing_safe
+    FutureApp.create_temp_excel = create_temp_excel
+
+
+_future_ultra_patch()
+
 if __name__ == "__main__":
     FutureApp().run()
