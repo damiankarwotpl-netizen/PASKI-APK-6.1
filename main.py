@@ -325,6 +325,184 @@ class FutureApp(App):
 
     def msg(self, t, txt): Popup(title=t, content=Label(text=txt, halign="center"), size_hint=(0.8, 0.4)).open()
 
+# -------------------------
+# MEGA PATCH - SAFE PICKER, IMPORT AND TABLE LOADER
+# Wklej ten blok PRZED if __name__ == "__main__"
+# -------------------------
+
+def _patched_pick_file(self, mode):
+    """Bezpieczny Android picker: działa z Scoped Storage, ma fallback.
+    Nadpisuje oryginalne FutureApp.pick_file.
+    """
+    if platform != "android":
+        self.msg("Błąd", "Funkcja dostępna tylko na Androidzie.")
+        return
+    try:
+        from jnius import autoclass
+        from android import activity
+        Intent = autoclass("android.content.Intent")
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+    except Exception as e:
+        # Jeżeli jnius nie dostępny — pokaż komunikat zamiast crasha
+        try: self.msg("Błąd JNI", str(e))
+        except: pass
+        return
+
+    intent = Intent(Intent.ACTION_GET_CONTENT)
+    intent.setType("*/*")
+    intent.addCategory(Intent.CATEGORY_OPENABLE)
+
+    def on_res(requestCode, resultCode, data):
+        if not data:
+            activity.unbind(on_activity_result=on_res)
+            return
+        try:
+            uri = data.getData()
+            ctx = PythonActivity.mActivity
+            stream = ctx.getContentResolver().openInputStream(uri)
+            # bezpieczna nazwa pliku w user_data_dir
+            if mode == "extra":
+                dest = Path(self.user_data_dir) / f"extra_{os.urandom(4).hex()}"
+            else:
+                dest = Path(self.user_data_dir) / f"{mode}_doc.xlsx"
+
+            # kopiuj strumień z użyciem Java byte[] gdy to możliwe, inaczej fallback na read()
+            with open(dest, "wb") as fout:
+                try:
+                    Byte = autoclass('java.lang.Byte')
+                    Array = autoclass('java.lang.reflect.Array')
+                    j_buf = Array.newInstance(Byte.TYPE, 8192)
+                    while True:
+                        r = stream.read(j_buf)
+                        # read() zwraca -1 przy EOF
+                        if r == -1 or r == 0:
+                            break
+                        fout.write(bytes(j_buf)[:r])
+                except Exception:
+                    # fallback: stream.read() zwraca int (0-255) albo -1
+                    while True:
+                        b = stream.read()
+                        if b == -1:
+                            break
+                        fout.write(bytes([b]))
+            try:
+                stream.close()
+            except Exception:
+                pass
+
+            # zaktualizuj stan aplikacji w zależności od trybu
+            if mode == "data":
+                self.current_file = dest
+                Clock.schedule_once(lambda dt: setattr(self.h_stat, "text", "✔ Excel załadowany. Otwórz tabelę."))
+            elif mode == "book":
+                # import kontaktów
+                try:
+                    self.import_book(dest)
+                except Exception as e:
+                    self.msg("Błąd importu", str(e))
+            elif mode == "extra":
+                self.global_attachments.append(str(dest))
+                try: self.update_att_lbl()
+                except: pass
+
+        except Exception as e:
+            # pokaż błąd zamiast crasha
+            try: self.msg("Błąd pliku", str(e))
+            except: pass
+        finally:
+            try: activity.unbind(on_activity_result=on_res)
+            except: pass
+
+    # zarejestruj callback i otwórz picker
+    activity.bind(on_activity_result=on_res)
+    PythonActivity.mActivity.startActivityForResult(intent, 1001)
+
+
+def _patched_import_book(self, p):
+    """Bezpieczny import książki adresowej (xlsx) — obsługuje brak nagłówka i brak kolumny mail."""
+    from openpyxl import load_workbook
+    try:
+        wb = load_workbook(str(p), data_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            self.msg("Błąd importu", "Plik jest pusty.")
+            return
+        header = rows[0]
+        if not header:
+            self.msg("Błąd importu", "Brak nagłówka w pliku.")
+            return
+        # normalizacja nagłówków
+        h = [str(x).lower() if x is not None else "" for x in header]
+        # znajdź kolumny (imię, nazwisko, mail)
+        ni, si = self.get_name_idxs(h)
+        mi = next((i for i, v in enumerate(h) if "mail" in v or "email" in v), None)
+        if mi is None:
+            self.msg("Błąd importu", "Nie znaleziono kolumny 'mail' w pliku.")
+            return
+        # wstawiaj tylko jeśli mail istnieje
+        for r in rows[1:]:
+            if not r:
+                continue
+            try:
+                mail = r[mi]
+            except Exception:
+                mail = None
+            if mail:
+                name = str(r[ni]).lower().strip() if ni < len(r) and r[ni] is not None else ""
+                sur = str(r[si]).lower().strip() if si < len(r) and r[si] is not None else ""
+                self.conn.execute("INSERT OR REPLACE INTO contacts VALUES(?,?,?)", (name, sur, str(mail).strip()))
+        self.conn.commit()
+        self.msg("Sukces", "Baza e-mail zaimportowana.")
+    except Exception as e:
+        self.msg("Błąd importu", str(e))
+
+
+def _patched_go_to_table(self, _):
+    """Bezpieczne przejście do tabeli: sprawdza istnienie pliku i poprawność arkusza."""
+    if not self.current_file:
+        self.msg("Błąd", "Wczytaj najpierw plik Excel Płac!")
+        return
+    try:
+        if not Path(self.current_file).exists():
+            self.msg("Błąd", "Plik nie istnieje (sprawdź ścieżkę).")
+            return
+        from openpyxl import load_workbook
+        wb = load_workbook(str(self.current_file), data_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            self.msg("Błąd Excela", "Arkusz jest pusty.")
+            return
+        # Bezpieczne zapełnienie full_data
+        self.full_data = [[("" if v is None else str(v)) for v in r] for r in rows]
+        try:
+            self.draw_table(self.full_data)
+        except Exception:
+            # jeśli rysowanie tabeli zawiedzie, ustaw przynajmniej current screen
+            pass
+        self.sm.current = "table"
+    except Exception as e:
+        self.msg("Błąd Excela", str(e))
+
+
+# Podmiana metod klasy (monkey patch)
+FutureApp.pick_file = _patched_pick_file
+FutureApp.import_book = _patched_import_book
+FutureApp.go_to_table = _patched_go_to_table
+
+# Dodatkowy helper (opcjonalny) — zapisz mały ślad diagnostyczny przy każdej próbie odczytu.
+def _log_read_attempt(path, note=""):
+    try:
+        with open(os.path.join(os.getcwd(), "picker_debug.log"), "a", encoding="utf-8") as lf:
+            lf.write(f"{datetime.now().isoformat()} | {path} | {note}\n")
+    except Exception:
+        pass
+
+# -------------------------
+# KONIEC PATCHA
+# -------------------------
+
 if __name__ == "__main__":
     try:
         FutureApp().run()
