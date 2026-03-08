@@ -1,70 +1,59 @@
 [app]
+# (str) Title of your application
+title = Future 10.1 ULTIMATE
 
-# (str) Tytuł Twojej aplikacji
-title = Future 9.4 ULTRA PRO
+# (str) Package name
+package.name = futureultipro
 
-# (str) Nazwa pakietu (bez spacji i znaków specjalnych)
-package.name = future_ultra_pro
+# (str) Package domain (needed for android packaging)
+package.domain = org.future.hr
 
-# (str) Domena pakietu (używana do identyfikacji w Google Play)
-package.domain = org.future.polska
-
-# (str) Katalog źródłowy (tam gdzie masz main.py)
+# (str) Source code where the main.py live
 source.dir = .
 
-# (list) Rozszerzenia plików, które mają zostać dołączone do APK
-source.include_exts = py,png,jpg,kv,atlas,json,xlsx,db
+# (list) Source files to include (let empty to include all the files)
+source.include_exts = py,png,jpg,kv,atlas,json
 
-# (str) Wersja aplikacji
-version = 9.4
+# (str) Application versioning (method 1)
+version = 10.1
 
-# (list) Biblioteki wymagane do działania (Kluczowe dla openpyxl i sqlite)
-# sqlite3 jest wbudowane w python3, ale dodajemy go dla pewności.
-# jdcal i et_xmlfile to zależności biblioteki openpyxl.
-requirements = python3,kivy==2.3.0,openpyxl,jdcal,et_xmlfile,jnius,android
+# (list) Application requirements
+# UWAGA: Dodano jdcal i et_xmlfile - są niezbędne dla stabilności openpyxl!
+requirements = python3, kivy==2.3.0, openpyxl, jdcal, et_xmlfile, jnius, android, sqlite3, requests, urllib3
 
-# (str) Orientacja ekranu
+# (str) Supported orientations
 orientation = portrait
 
-# -----------------------------------------------------------------------------
-# Ustawienia Androida
-# -----------------------------------------------------------------------------
+# (bool) Indicate if the application should be fullscreen or not
+fullscreen = 0
 
-# (list) Uprawnienia Androida - Kluczowe dla Internetu (SMTP) i plików
-android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, MANAGE_EXTERNAL_STORAGE
+# (list) Permissions
+android.permissions = READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, INTERNET
 
-# (int) Android API (33 to Android 13)
+# (int) Target Android API, should be as high as possible.
 android.api = 33
 
-# (int) Minimalne API (21 to Android 5.0 - zapewnia dużą kompatybilność)
+# (int) Minimum API your APK will support.
 android.minapi = 21
 
-# (int) Wersja NDK (zalecana dla aktualnego Buildozera)
+# (str) Android NDK version to use
 android.ndk = 25b
 
-# (bool) Czy aplikacja ma być pełnoekranowa
-android.fullscreen = 0
+# (list) The Android architectures to build for
+android.archs = armeabi-v7a, arm64-v8a
 
-# (list) Architektury procesorów (arm64 to standard dla nowych telefonów)
-android.archs = arm64-v8a, armeabi-v7a
+# (bool) enables Android auto backup feature (Android API >= 23)
+android.allow_backup = True
 
-# (bool) Włączenie obsługi SQLite
-android.enable_androidx = True
+# (str) Path to a custom manifest template
+# android.manifest_template = manifest.tmpl
 
-# (str) Ikona aplikacji (jeśli masz plik icon.png)
-# icon.filename = %(source.dir)s/icon.png
-
-# (str) Ekran powitalny (jeśli masz plik presplash.png)
-# presplash.filename = %(source.dir)s/presplash.png
-
-# -----------------------------------------------------------------------------
-# Ustawienia Buildozera
-# -----------------------------------------------------------------------------
+# (list) Android additionnal libraries to copy into libs/armeabi
+# android.add_libs_armeabi = lib/armeabi/libgnustl_shared.so
 
 [buildozer]
-
-# (int) Poziom logowania (2 = debugowanie, pomocne przy błędach)
+# (int) Log level (0 = error only, 1 = info, 2 = debug (with command output))
 log_level = 2
 
-# (int) Czy ostrzegać przed uruchomieniem jako root
+# (int) Display warning if buildozer is run as root (0 = NO, 1 = YES)
 warn_on_root = 1
