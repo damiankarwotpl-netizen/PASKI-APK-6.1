@@ -325,292 +325,399 @@ class FutureApp(App):
 
     def msg(self, t, txt): Popup(title=t, content=Label(text=txt, halign="center"), size_hint=(0.8, 0.4)).open()
 
-# -------------------------
-# MEGA PATCH - SAFE PICKER, IMPORT AND TABLE LOADER
-# Wklej ten blok PRZED if __name__ == "__main__"
-# -------------------------
 
-def _patched_pick_file(self, mode):
-    """Bezpieczny Android picker: działa z Scoped Storage, ma fallback.
-    Nadpisuje oryginalne FutureApp.pick_file.
-    """
-    if platform != "android":
-        self.msg("Błąd", "Funkcja dostępna tylko na Androidzie.")
+# ==================================================
+# MEGA PATCH v12 - FULL FIX + TEST PANEL
+# ==================================================
+
+from kivy.metrics import dp
+from kivy.uix.popup import Popup
+from kivy.uix.label import Label
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
+from kivy.uix.screenmanager import Screen
+from kivy.clock import Clock
+
+
+# ==================================================
+# SAFE POPUP
+# ==================================================
+
+def safe_popup(title,text):
+
+    box = BoxLayout(orientation="vertical",padding=20,spacing=10)
+
+    box.add_widget(Label(text=str(text)))
+
+    btn = Button(text="OK",size_hint_y=None,height=dp(45))
+    box.add_widget(btn)
+
+    p = Popup(title=title,content=box,size_hint=(0.8,0.6))
+    btn.bind(on_press=p.dismiss)
+
+    p.open()
+
+
+# ==================================================
+# SAFE EXCEL LOADER
+# ==================================================
+
+def patched_go_to_table(self,*_):
+
+    if not getattr(self,"current_file",None):
+
+        safe_popup("Błąd","Najpierw wczytaj plik Excel.")
         return
+
     try:
-        from jnius import autoclass
-        from android import activity
-        Intent = autoclass("android.content.Intent")
-        PythonActivity = autoclass("org.kivy.android.PythonActivity")
-    except Exception as e:
-        # Jeżeli jnius nie dostępny — pokaż komunikat zamiast crasha
-        try: self.msg("Błąd JNI", str(e))
-        except: pass
-        return
 
-    intent = Intent(Intent.ACTION_GET_CONTENT)
-    intent.setType("*/*")
-    intent.addCategory(Intent.CATEGORY_OPENABLE)
-
-    def on_res(requestCode, resultCode, data):
-        if not data:
-            activity.unbind(on_activity_result=on_res)
-            return
-        try:
-            uri = data.getData()
-            ctx = PythonActivity.mActivity
-            stream = ctx.getContentResolver().openInputStream(uri)
-            # bezpieczna nazwa pliku w user_data_dir
-            if mode == "extra":
-                dest = Path(self.user_data_dir) / f"extra_{os.urandom(4).hex()}"
-            else:
-                dest = Path(self.user_data_dir) / f"{mode}_doc.xlsx"
-
-            # kopiuj strumień z użyciem Java byte[] gdy to możliwe, inaczej fallback na read()
-            with open(dest, "wb") as fout:
-                try:
-                    Byte = autoclass('java.lang.Byte')
-                    Array = autoclass('java.lang.reflect.Array')
-                    j_buf = Array.newInstance(Byte.TYPE, 8192)
-                    while True:
-                        r = stream.read(j_buf)
-                        # read() zwraca -1 przy EOF
-                        if r == -1 or r == 0:
-                            break
-                        fout.write(bytes(j_buf)[:r])
-                except Exception:
-                    # fallback: stream.read() zwraca int (0-255) albo -1
-                    while True:
-                        b = stream.read()
-                        if b == -1:
-                            break
-                        fout.write(bytes([b]))
-            try:
-                stream.close()
-            except Exception:
-                pass
-
-            # zaktualizuj stan aplikacji w zależności od trybu
-            if mode == "data":
-                self.current_file = dest
-                Clock.schedule_once(lambda dt: setattr(self.h_stat, "text", "✔ Excel załadowany. Otwórz tabelę."))
-            elif mode == "book":
-                # import kontaktów
-                try:
-                    self.import_book(dest)
-                except Exception as e:
-                    self.msg("Błąd importu", str(e))
-            elif mode == "extra":
-                self.global_attachments.append(str(dest))
-                try: self.update_att_lbl()
-                except: pass
-
-        except Exception as e:
-            # pokaż błąd zamiast crasha
-            try: self.msg("Błąd pliku", str(e))
-            except: pass
-        finally:
-            try: activity.unbind(on_activity_result=on_res)
-            except: pass
-
-    # zarejestruj callback i otwórz picker
-    activity.bind(on_activity_result=on_res)
-    PythonActivity.mActivity.startActivityForResult(intent, 1001)
-
-
-def _patched_import_book(self, p):
-    """Bezpieczny import książki adresowej (xlsx) — obsługuje brak nagłówka i brak kolumny mail."""
-    from openpyxl import load_workbook
-    try:
-        wb = load_workbook(str(p), data_only=True)
-        ws = wb.active
-        rows = list(ws.iter_rows(values_only=True))
-        if not rows:
-            self.msg("Błąd importu", "Plik jest pusty.")
-            return
-        header = rows[0]
-        if not header:
-            self.msg("Błąd importu", "Brak nagłówka w pliku.")
-            return
-        # normalizacja nagłówków
-        h = [str(x).lower() if x is not None else "" for x in header]
-        # znajdź kolumny (imię, nazwisko, mail)
-        ni, si = self.get_name_idxs(h)
-        mi = next((i for i, v in enumerate(h) if "mail" in v or "email" in v), None)
-        if mi is None:
-            self.msg("Błąd importu", "Nie znaleziono kolumny 'mail' w pliku.")
-            return
-        # wstawiaj tylko jeśli mail istnieje
-        for r in rows[1:]:
-            if not r:
-                continue
-            try:
-                mail = r[mi]
-            except Exception:
-                mail = None
-            if mail:
-                name = str(r[ni]).lower().strip() if ni < len(r) and r[ni] is not None else ""
-                sur = str(r[si]).lower().strip() if si < len(r) and r[si] is not None else ""
-                self.conn.execute("INSERT OR REPLACE INTO contacts VALUES(?,?,?)", (name, sur, str(mail).strip()))
-        self.conn.commit()
-        self.msg("Sukces", "Baza e-mail zaimportowana.")
-    except Exception as e:
-        self.msg("Błąd importu", str(e))
-
-
-def _patched_go_to_table(self, _):
-    """Bezpieczne przejście do tabeli: sprawdza istnienie pliku i poprawność arkusza."""
-    if not self.current_file:
-        self.msg("Błąd", "Wczytaj najpierw plik Excel Płac!")
-        return
-    try:
-        if not Path(self.current_file).exists():
-            self.msg("Błąd", "Plik nie istnieje (sprawdź ścieżkę).")
-            return
         from openpyxl import load_workbook
-        wb = load_workbook(str(self.current_file), data_only=True)
+
+        wb = load_workbook(str(self.current_file),data_only=True)
+
         ws = wb.active
-        rows = list(ws.iter_rows(values_only=True))
-        if not rows:
-            self.msg("Błąd Excela", "Arkusz jest pusty.")
+
+        data = []
+
+        for row in ws.iter_rows(values_only=True):
+
+            r=[]
+
+            for c in row:
+
+                if c is None:
+                    r.append("")
+                else:
+                    r.append(str(c))
+
+            data.append(r)
+
+        if len(data) < 2:
+
+            safe_popup("Excel","Plik nie zawiera danych.")
             return
-        # Bezpieczne zapełnienie full_data
-        self.full_data = [[("" if v is None else str(v)) for v in r] for r in rows]
-        try:
-            self.draw_table(self.full_data)
-        except Exception:
-            # jeśli rysowanie tabeli zawiedzie, ustaw przynajmniej current screen
-            pass
+
+        self.full_data = data
+
+        patched_draw_table(self,data)
+
         self.sm.current = "table"
+
+        cols = len(data[0])
+        rows = len(data) - 1
+
+        safe_popup(
+            "Baza załadowana",
+            f"✔ kompatybilny Excel\n\n"
+            f"kolumny: {cols}\n"
+            f"rekordy: {rows}"
+        )
+
     except Exception as e:
-        self.msg("Błąd Excela", str(e))
+
+        safe_popup("Excel error",str(e))
 
 
-# Podmiana metod klasy (monkey patch)
-FutureApp.pick_file = _patched_pick_file
-FutureApp.import_book = _patched_import_book
-FutureApp.go_to_table = _patched_go_to_table
+# ==================================================
+# SAFE TABLE RENDER
+# ==================================================
 
-# Dodatkowy helper (opcjonalny) — zapisz mały ślad diagnostyczny przy każdej próbie odczytu.
-def _log_read_attempt(path, note=""):
-    try:
-        with open(os.path.join(os.getcwd(), "picker_debug.log"), "a", encoding="utf-8") as lf:
-            lf.write(f"{datetime.now().isoformat()} | {path} | {note}\n")
-    except Exception:
-        pass
-
-# -------------------------
-# KONIEC PATCHA
-# -------------------------
-
-# -------------------------
-# TABLE CRASH FIX PATCH
-# -------------------------
-
-def _safe_draw_table(self, data):
+def patched_draw_table(self,data):
 
     try:
+
         self.grid.clear_widgets()
-        self.grid.cols = 4
-    except:
-        return
 
-    if not data or len(data) < 2:
-        return
+        if not data:
+            safe_popup("Tabela","Brak danych.")
+            return
 
-    rows = data[1:100]
+        cols = max(1,len(data[0]))
 
-    for r in rows:
+        self.grid.cols = cols + 1
 
-        # zabezpieczenie długości wiersza
-        row = list(r)
-        while len(row) < 3:
-            row.append("")
+        limit = min(len(data),120)
 
-        # komórki
-        for cell in row[:3]:
-            try:
-                txt = "" if cell is None else str(cell)
-            except:
-                txt = ""
-            self.grid.add_widget(
-                Label(
-                    text=txt[:12],
-                    font_size=11,
+        for r in data[1:limit]:
+
+            row=list(r)
+
+            while len(row) < cols:
+                row.append("")
+
+            for cell in row:
+
+                self.grid.add_widget(Label(
+                    text=str(cell)[:20],
                     size_hint_y=None,
-                    height=dp(42)
-                )
-            )
+                    height=dp(40),
+                    font_size=12
+                ))
 
-        # przycisk eksportu
-        try:
             btn = Button(
-                text="EKSPORT",
-                size_hint=(None, None),
-                size=(dp(80), dp(42)),
-                background_color=(0, 0.6, 0.2, 1)
+                text="EXPORT",
+                size_hint=(None,None),
+                size=(dp(90),dp(40))
             )
 
-            def _export(instance, row_data=row):
-                try:
-                    self.single_export(row_data)
-                except Exception as e:
-                    self.msg("Błąd eksportu", str(e))
-
-            btn.bind(on_press=_export)
+            btn.bind(on_press=lambda x,row=row: patched_export(self,row))
 
             self.grid.add_widget(btn)
 
-        except Exception as e:
-            print("BTN ERROR", e)
+    except Exception as e:
+
+        safe_popup("Błąd tabeli",str(e))
 
 
-FutureApp.draw_table = _safe_draw_table
+# ==================================================
+# EXPORT
+# ==================================================
 
-# -------------------------
-# SAFE TABLE LOADER
-# -------------------------
-
-def _safe_go_to_table(self, _):
-
-    if not self.current_file:
-        self.msg("Błąd", "Najpierw wczytaj Excel.")
-        return
-
-    from openpyxl import load_workbook
+def patched_export(self,row):
 
     try:
 
-        wb = load_workbook(str(self.current_file), data_only=True)
+        from openpyxl import Workbook
+        from pathlib import Path
+        from datetime import datetime
+
+        wb = Workbook()
+
         ws = wb.active
 
-        rows = list(ws.iter_rows(values_only=True))
+        ws.append(self.full_data[0])
+        ws.append(row)
 
-        if not rows:
-            self.msg("Błąd", "Excel jest pusty.")
-            return
+        name = f"export_{datetime.now().strftime('%H%M%S')}.xlsx"
 
-        # zamiana na stringi
-        self.full_data = []
+        p = Path(self.user_data_dir)/name
 
-        for r in rows:
-            rr = []
-            for v in r:
-                rr.append("" if v is None else str(v))
-            self.full_data.append(rr)
+        wb.save(p)
 
-        self.draw_table(self.full_data)
-        self.sm.current = "table"
+        safe_popup("Export OK",f"Plik zapisany:\n{name}")
 
     except Exception as e:
-        self.msg("Błąd Excela", str(e))
+
+        safe_popup("Export error",str(e))
 
 
-FutureApp.go_to_table = _safe_go_to_table
+# ==================================================
+# TEST FUNCTIONS
+# ==================================================
 
-# -------------------------
-# END PATCH
-# -------------------------
+def debug_excel(self,*_):
+
+    if not getattr(self,"full_data",None):
+
+        safe_popup("Excel","Brak danych w pamięci.")
+        return
+
+    rows=len(self.full_data)
+    cols=len(self.full_data[0])
+
+    headers=", ".join(self.full_data[0])
+
+    safe_popup(
+        "TEST EXCEL",
+        f"Wiersze: {rows}\n"
+        f"Kolumny: {cols}\n\n"
+        f"{headers}"
+    )
+
+
+def debug_database(self,*_):
+
+    try:
+
+        cur=self.conn.cursor()
+
+        tables=cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+
+        txt=""
+
+        for t in tables:
+
+            c=cur.execute(
+                f"SELECT COUNT(*) FROM {t[0]}"
+            ).fetchone()[0]
+
+            txt+=f"{t[0]} : {c} rekordów\n"
+
+        if not txt:
+            txt="Brak tabel."
+
+        safe_popup("BAZA SQLITE",txt)
+
+    except Exception as e:
+
+        safe_popup("DB error",str(e))
+
+
+def debug_export(self,*_):
+
+    try:
+
+        from openpyxl import Workbook
+        from pathlib import Path
+
+        wb=Workbook()
+
+        ws=wb.active
+
+        ws.append(["TEST","EXPORT"])
+        ws.append(["OK","OK"])
+
+        p=Path(self.user_data_dir)/"debug_export.xlsx"
+
+        wb.save(p)
+
+        safe_popup("EXPORT TEST",f"Zapisano:\n{p}")
+
+    except Exception as e:
+
+        safe_popup("Export error",str(e))
+
+
+def debug_apk(self,*_):
+
+    import sys
+
+    txt=(
+        f"Python:\n{sys.version}\n\n"
+        f"user_data_dir:\n{self.user_data_dir}\n\n"
+        f"Excel:\n{getattr(self,'current_file',None)}"
+    )
+
+    safe_popup("INFO APK",txt)
+
+
+# ==================================================
+# TEST SCREEN
+# ==================================================
+
+class TestScreen(Screen):
+
+    def __init__(self,app,**kw):
+
+        super().__init__(**kw)
+
+        layout=BoxLayout(
+            orientation="vertical",
+            spacing=10,
+            padding=20
+        )
+
+        layout.add_widget(Button(
+            text="TEST EXCEL",
+            size_hint_y=None,
+            height=dp(50),
+            on_press=app.debug_excel
+        ))
+
+        layout.add_widget(Button(
+            text="TEST BAZY",
+            size_hint_y=None,
+            height=dp(50),
+            on_press=app.debug_database
+        ))
+
+        layout.add_widget(Button(
+            text="TEST EXPORT",
+            size_hint_y=None,
+            height=dp(50),
+            on_press=app.debug_export
+        ))
+
+        layout.add_widget(Button(
+            text="INFO APK",
+            size_hint_y=None,
+            height=dp(50),
+            on_press=app.debug_apk
+        ))
+
+        layout.add_widget(Button(
+            text="POWRÓT",
+            size_hint_y=None,
+            height=dp(50),
+            on_press=lambda x:setattr(app.sm,"current","home")
+        ))
+
+        self.add_widget(layout)
+
+
+# ==================================================
+# ADD TEST SCREEN
+# ==================================================
+
+def add_test_screen(app):
+
+    try:
+
+        ts=TestScreen(app,name="test")
+
+        app.sm.add_widget(ts)
+
+    except Exception as e:
+
+        print("test screen error",e)
+
+
+# ==================================================
+# ADD TEST BUTTON
+# ==================================================
+
+def add_test_button(app):
+
+    try:
+
+        layout=app.home_scr.children[0]
+
+        layout.add_widget(Button(
+            text="TEST",
+            size_hint_y=None,
+            height=dp(50),
+            on_press=lambda x:setattr(app.sm,"current","test")
+        ))
+
+    except Exception as e:
+
+        print("test button error",e)
+
+
+# ==================================================
+# PATCH METHODS
+# ==================================================
+
+FutureApp.go_to_table = patched_go_to_table
+FutureApp.draw_table = patched_draw_table
+FutureApp.single_export = patched_export
+
+FutureApp.debug_excel = debug_excel
+FutureApp.debug_database = debug_database
+FutureApp.debug_export = debug_export
+FutureApp.debug_apk = debug_apk
+
+
+# ==================================================
+# PATCH BUILD
+# ==================================================
+
+_old_build = FutureApp.build
+
+
+def patched_build(self):
+
+    root=_old_build(self)
+
+    Clock.schedule_once(lambda dt:add_test_screen(self),0.5)
+    Clock.schedule_once(lambda dt:add_test_button(self),1)
+
+    return root
+
+
+FutureApp.build = patched_build
 
 if __name__ == "__main__":
     try:
