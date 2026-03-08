@@ -310,4 +310,12 @@ class FutureApp(App):
         p = Popup(title="Logi", content=box, size_hint=(0.9, 0.9)); p.open()
 
 if __name__ == "__main__":
-    FutureApp().run()
+    try:
+        FutureApp().run()
+    except Exception as e:
+        # Próba zapisania błędu do pliku, jeśli aplikacja padnie przed startem UI
+        import traceback
+        with open("/sdcard/Documents/crash_log.txt", "w") as f:
+            f.write(str(e))
+            f.write("\n\nFull Traceback:\n")
+            f.write(traceback.format_exc())
