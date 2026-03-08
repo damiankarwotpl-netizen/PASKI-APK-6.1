@@ -76,16 +76,14 @@ class FutureApp(App):
         self.build_email()
         self.build_smtp()
 
-        self.sm.add_widget(self.home)
+self.sm.add_widget(self.home)
+        self.sm.add_widget(self.table)
+        self.sm.add_widget(self.email)
+        self.sm.add_widget(self.smtp)
 
+        apply_mail_patch(self)
 
-self.sm.add_widget(self.table)
-self.sm.add_widget(self.email)
-self.sm.add_widget(self.smtp)
-
-apply_mail_patch(self)
-
-return self.sm
+        return self.sm
 
 
 def import_address_book(self, _):
