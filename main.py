@@ -78,27 +78,24 @@ class FutureApp(App):
         self.build_smtp()
 
         self.sm.add_widget(self.home)
-        self.sm.add_widget(self.table)
-        self.sm.add_widget(self.email)
-        self.sm.add_widget(self.smtp)
+self.sm.add_widget(self.table)
+self.sm.add_widget(self.email)
+self.sm.add_widget(self.smtp)
 
-        apply_mail_patch(self)
+apply_mail_patch(self)
 
-        return self.sm
+return self.sm
 
-    apply_mail_patch(self)
 
-        return self.sm
+def import_address_book(self, _):
 
-    def import_address_book(self, _):
+    if not self.current_file:
+        self.popup("Błąd", "Najpierw wybierz plik Excel")
+        return
 
-        if not self.current_file:
-            self.popup("Błąd", "Najpierw wybierz plik Excel")
-            return
+    import_address_excel(self, self.current_file)
 
-            import_address_excel(self, self.current_file)
-
-            self.popup("OK", "Książka adresowa zaimportowana")
+    self.popup("OK", "Książka adresowa zaimportowana")
 # -----------------------------
 # HOME
 # -----------------------------
