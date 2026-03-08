@@ -172,6 +172,5 @@ jobs:
         with:
           name: paski-future-build
           path: |
-            path: |
-               .buildozer/**/*.apk
-               **/*.apk
+            **/outputs/apk/**/*.apk
+            **/*.apk
