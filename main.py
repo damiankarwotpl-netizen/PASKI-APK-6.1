@@ -86,15 +86,19 @@ class FutureApp(App):
 
         return self.sm
 
-            def import_address_book(self, _):
+    apply_mail_patch(self)
 
-                if not self.current_file:
-                    self.popup("Błąd", "Najpierw wybierz plik Excel")
-                return
+        return self.sm
 
-                    import_address_excel(self, self.current_file)
+    def import_address_book(self, _):
 
-                    self.popup("OK", "Książka adresowa zaimportowana")
+        if not self.current_file:
+            self.popup("Błąd", "Najpierw wybierz plik Excel")
+            return
+
+            import_address_excel(self, self.current_file)
+
+            self.popup("OK", "Książka adresowa zaimportowana")
 # -----------------------------
 # HOME
 # -----------------------------
