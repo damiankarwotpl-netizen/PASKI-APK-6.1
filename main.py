@@ -327,6 +327,79 @@ class FutureApp(App):
 
     def msg(self, t, txt): Popup(title=t, content=Label(text=txt, halign="center"), size_hint=(0.8, 0.4)).open()
 
+# ===============================
+# PATCH FIX ANDROID FILE PICKER
+# ===============================
+
+def _fixed_pick_file(self, mode):
+
+    from kivy.utils import platform
+    if platform != "android":
+        self.msg("Błąd", "Picker działa tylko na Androidzie")
+        return
+
+    from jnius import autoclass
+    from android import activity
+
+    Intent = autoclass("android.content.Intent")
+    PythonActivity = autoclass("org.kivy.android.PythonActivity")
+
+    intent = Intent(Intent.ACTION_GET_CONTENT)
+    intent.setType("*/*")
+    intent.addCategory(Intent.CATEGORY_OPENABLE)
+
+    def on_res(req, res, data):
+
+        if req != 1001:
+            return
+
+        if data is None:
+            activity.unbind(on_activity_result=on_res)
+            return
+
+        try:
+            uri = data.getData()
+
+            ctx = PythonActivity.mActivity
+            resolver = ctx.getContentResolver()
+            stream = resolver.openInputStream(uri)
+
+            dest = Path(self.user_data_dir) / f"{mode}_import_file"
+
+            with open(dest, "wb") as f:
+                while True:
+                    chunk = stream.read(4096)
+                    if chunk == -1 or chunk is None:
+                        break
+                    f.write(bytes(chunk))
+
+            stream.close()
+
+            if mode == "data":
+                self.current_file = dest
+                self.h_stat.text = "✔ Excel załadowany"
+
+            elif mode == "book":
+                self.import_book(dest)
+
+            elif mode == "extra":
+                self.global_attachments.append(str(dest))
+                self.update_att_lbl()
+
+        except Exception as e:
+            self.msg("Błąd pliku", str(e))
+
+        activity.unbind(on_activity_result=on_res)
+
+    activity.bind(on_activity_result=on_res)
+
+    ctx = PythonActivity.mActivity
+    ctx.startActivityForResult(intent, 1001)
+
+
+# NADPISANIE ORYGINALNEJ FUNKCJI
+FutureApp.pick_file = _fixed_pick_file
+
 if __name__ == "__main__":
     try:
         FutureApp().run()
