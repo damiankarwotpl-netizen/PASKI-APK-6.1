@@ -20,6 +20,7 @@ from kivy.uix.checkbox import CheckBox
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.screenmanager import ScreenManager, Screen
 
+
 APP_TITLE = "Future 9.0 ULTRA PRO"
 
 
@@ -76,14 +77,16 @@ class FutureApp(App):
         self.build_email()
         self.build_smtp()
 
-self.sm.add_widget(self.home)
-        self.sm.add_widget(self.table)
-        self.sm.add_widget(self.email)
-        self.sm.add_widget(self.smtp)
+        self.sm.add_widget(self.home)
 
-        apply_mail_patch(self)
 
-        return self.sm
+self.sm.add_widget(self.table)
+self.sm.add_widget(self.email)
+self.sm.add_widget(self.smtp)
+
+apply_mail_patch(self)
+
+return self.sm
 
 
 def import_address_book(self, _):
@@ -689,6 +692,7 @@ from email.message import EmailMessage
 from openpyxl import Workbook
 from kivy.clock import Clock
 
+
 # -------------------------
 # DATABASE
 # -------------------------
@@ -702,14 +706,16 @@ def init_mail_db(self):
 
     cur = self.mail_db.cursor()
 
-    cur.execute("""
+    cur.execute(
+        """
     CREATE TABLE IF NOT EXISTS address_book(
         id INTEGER PRIMARY KEY,
         name TEXT,
         surname TEXT,
         email TEXT
     )
-    """)
+    """
+    )
 
     self.mail_db.commit()
 
