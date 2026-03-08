@@ -1,81 +1,70 @@
 [app]
 
-# (str) Title of your application
-title = Paski Future
+# (str) Tytuł Twojej aplikacji
+title = Future 9.4 ULTRA PRO
 
-# (str) Package name
-package.name = paskifuture10
+# (str) Nazwa pakietu (bez spacji i znaków specjalnych)
+package.name = future_ultra_pro
 
-# (str) Package domain
-package.domain = pl.future
+# (str) Domena pakietu (używana do identyfikacji w Google Play)
+package.domain = org.future.polska
 
-# (str) Source code where the main.py lives
+# (str) Katalog źródłowy (tam gdzie masz main.py)
 source.dir = .
 
-# (list) Source files to include
-source.include_exts = py,png,jpg,kv,json,txt
+# (list) Rozszerzenia plików, które mają zostać dołączone do APK
+source.include_exts = py,png,jpg,kv,atlas,json,xlsx,db
 
-# (str) Application version
-version = 1.0.0
+# (str) Wersja aplikacji
+version = 9.4
 
-# (list) Application requirements
-requirements = python3,kivy,plyer,openpyxl,et_xmlfile,jdcal,xlrd==1.2.0,pyjnius
+# (list) Biblioteki wymagane do działania (Kluczowe dla openpyxl i sqlite)
+# sqlite3 jest wbudowane w python3, ale dodajemy go dla pewności.
+# jdcal i et_xmlfile to zależności biblioteki openpyxl.
+requirements = python3,kivy==2.3.0,openpyxl,jdcal,et_xmlfile,jnius,android
 
-# (str) Orientation
+# (str) Orientacja ekranu
 orientation = portrait
 
-# (bool) Fullscreen
-fullscreen = 0
+# -----------------------------------------------------------------------------
+# Ustawienia Androida
+# -----------------------------------------------------------------------------
 
-# (list) Permissions
-android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
+# (list) Uprawnienia Androida - Kluczowe dla Internetu (SMTP) i plików
+android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, MANAGE_EXTERNAL_STORAGE
 
-# (int) Android API
+# (int) Android API (33 to Android 13)
 android.api = 33
 
-# (int) Minimum API
-android.minapi = 24
+# (int) Minimalne API (21 to Android 5.0 - zapewnia dużą kompatybilność)
+android.minapi = 21
 
-# (int) NDK API
-android.ndk_api = 24
-
-# (str) Android NDK version
+# (int) Wersja NDK (zalecana dla aktualnego Buildozera)
 android.ndk = 25b
 
-# (list) Architectures
+# (bool) Czy aplikacja ma być pełnoekranowa
+android.fullscreen = 0
+
+# (list) Architektury procesorów (arm64 to standard dla nowych telefonów)
 android.archs = arm64-v8a, armeabi-v7a
 
-# (bool) Enable AndroidX
+# (bool) Włączenie obsługi SQLite
 android.enable_androidx = True
 
-# (bool) Allow backup
-android.allow_backup = False
+# (str) Ikona aplikacji (jeśli masz plik icon.png)
+# icon.filename = %(source.dir)s/icon.png
 
-# (str) Entry point
-android.entrypoint = org.kivy.android.PythonActivity
+# (str) Ekran powitalny (jeśli masz plik presplash.png)
+# presplash.filename = %(source.dir)s/presplash.png
 
-# (str) Logcat filters
-android.logcat_filters = *:S python:D
-
-# (bool) Copy libs
-android.copy_libs = 1
-
-# (int) Window soft input
-android.window_softinput_mode = adjustResize
-
-# (bool) Use logcat
-android.logcat = True
-
-# (bool) Enable multiwindow
-android.multiwindow = False
-
-
-# ------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Ustawienia Buildozera
+# -----------------------------------------------------------------------------
 
 [buildozer]
 
-# (int) Log level
+# (int) Poziom logowania (2 = debugowanie, pomocne przy błędach)
 log_level = 2
 
-# (int) Warn on root
+# (int) Czy ostrzegać przed uruchomieniem jako root
 warn_on_root = 1
