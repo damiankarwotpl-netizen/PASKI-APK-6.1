@@ -735,4 +735,221 @@ _future_pro_patch()
 
 # ===== END PATCH =====
 
+# ===== FUTUREAPP MEGA PATCH =====
+
+import csv
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.checkbox import CheckBox
+from kivy.graphics import Color, Rectangle
+
+# --------------------------------
+# FIX DATABASE LOADING
+# --------------------------------
+
+def load_database_fixed(self, path):
+
+    import pandas as pd
+
+    try:
+
+        if path.endswith(".csv"):
+            df=pd.read_csv(path)
+
+        elif path.endswith(".xlsx"):
+            df=pd.read_excel(path)
+
+        else:
+            return
+
+        self.database=df.fillna(0)
+
+        self.refresh_contacts_list()
+
+    except Exception as e:
+
+        print("LOAD ERROR:",e)
+
+FutureApp.load_database=load_database_fixed
+
+
+# --------------------------------
+# RESTORE EDIT + DELETE
+# --------------------------------
+
+def delete_contact_fixed(self,email):
+
+    self.database=self.database[self.database["email"]!=email]
+
+    self.refresh_contacts_list()
+
+FutureApp.delete_contact=delete_contact_fixed
+
+
+# --------------------------------
+# TABLE VIEW IMPROVED
+# --------------------------------
+
+def create_table_preview(self):
+
+    df=self.database
+
+    selected=self.selected_columns
+
+    grid=GridLayout(cols=len(selected),size_hint_y=None)
+    grid.bind(minimum_height=grid.setter("height"))
+
+    # HEADER
+    for col in selected:
+
+        lbl=SafeLabel(text=str(col),bold=True)
+
+        with lbl.canvas.before:
+            Color(.2,.2,.2,1)
+            Rectangle(size=lbl.size,pos=lbl.pos)
+
+        grid.add_widget(lbl)
+
+    # ROWS
+    for i,row in df.iterrows():
+
+        for col in selected:
+
+            val=row[col]
+
+            if val=="" or val is None:
+                val=0
+
+            lbl=SafeLabel(text=str(val))
+
+            with lbl.canvas.before:
+
+                if i%2==0:
+                    Color(.92,.92,.92,1)
+                else:
+                    Color(.82,.82,.82,1)
+
+                Rectangle(size=lbl.size,pos=lbl.pos)
+
+            grid.add_widget(lbl)
+
+    scroll=ScrollView()
+    scroll.add_widget(grid)
+
+    return scroll
+
+FutureApp.create_table_preview=create_table_preview
+
+
+# --------------------------------
+# SELECT ALL CONTACTS
+# --------------------------------
+
+def select_all_contacts(self,instance):
+
+    for cb in self.contact_checkboxes:
+
+        cb.active=True
+
+FutureApp.select_all_contacts=select_all_contacts
+
+
+# --------------------------------
+# ATTACHMENT WORKFLOW
+# --------------------------------
+
+def open_attach_panel(self):
+
+    layout=BoxLayout(orientation="vertical")
+
+    btn_attach=PremiumButton(
+        text="DODAJ ZAŁĄCZNIK",
+        on_press=self.pick_attachment
+    )
+
+    btn_all=PremiumButton(
+        text="WYBIERZ WSZYSTKICH",
+        on_press=self.select_all_contacts
+    )
+
+    btn_send=PremiumButton(
+        text="WYŚLIJ",
+        on_press=self.send_emails
+    )
+
+    layout.add_widget(btn_attach)
+    layout.add_widget(btn_all)
+    layout.add_widget(btn_send)
+
+    self.show_popup("Wyślij załącznik",layout)
+
+FutureApp.open_quick_attach=open_attach_panel
+
+
+# --------------------------------
+# SHOW PHONE NUMBER
+# --------------------------------
+
+def refresh_contacts_list_phone(self):
+
+    self.c_list.clear_widgets()
+
+    for _,row in self.database.iterrows():
+
+        n=str(row.get("name",""))
+        s=str(row.get("surname",""))
+        e=str(row.get("email",""))
+        ph=str(row.get("phone",""))
+
+        row_ui=BoxLayout()
+
+        cb=CheckBox()
+        row_ui.add_widget(cb)
+
+        info=BoxLayout(orientation="vertical")
+
+        info.add_widget(SafeLabel(text=f"{n} {s}",bold=True))
+
+        info.add_widget(
+            SafeLabel(
+                text=f"{e} | TEL:{ph}",
+                font_size="12sp"
+            )
+        )
+
+        row_ui.add_widget(info)
+
+        self.c_list.add_widget(row_ui)
+
+FutureApp.refresh_contacts_list=refresh_contacts_list_phone
+
+
+# --------------------------------
+# HIDE QUICK SEND
+# --------------------------------
+
+def setup_email_ui_clean(self):
+
+    screen=self.screens["email"]
+
+    for child in screen.children:
+
+        if isinstance(child,BoxLayout):
+
+            child.clear_widgets()
+
+            child.add_widget(
+                PremiumButton(
+                    text="WYŚLIJ ZAŁĄCZNIK",
+                    on_press=self.open_quick_attach
+                )
+            )
+
+            break
+
+FutureApp.setup_email_ui=setup_email_ui_clean
+
+
+# ===== END FUTUREAPP PATCH =====
+
 if __name__ == "__main__": FutureApp().run()
