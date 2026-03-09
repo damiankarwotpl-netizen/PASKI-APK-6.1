@@ -407,5 +407,322 @@ class FutureApp(App):
         b = PremiumButton(text="OK"); b.bind(on_press=lambda x: popup.dismiss()); box.add_widget(b)
         popup = Popup(title=title, content=box, size_hint=(0.8, 0.4)); popup.open()
 
+# =====================================================
+# MEGA STABILIZATION PATCH v9.5
+# TABLE PREVIEW + DATABASE INFO + SAFE EXCEL LOAD
+# =====================================================
+
+from openpyxl.styles import PatternFill
+
+HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+
+
+# -----------------------------------------------------
+# SAFE POPUP
+# -----------------------------------------------------
+def popup(self, title, msg):
+
+    box = BoxLayout(orientation="vertical", padding=20, spacing=15)
+
+    box.add_widget(Label(text=msg))
+
+    btn = PremiumButton(text="OK")
+    box.add_widget(btn)
+
+    p = Popup(
+        title=title,
+        content=box,
+        size_hint=(0.8,0.5)
+    )
+
+    btn.bind(on_press=p.dismiss)
+    p.open()
+
+
+FutureApp.popup = popup
+
+
+# -----------------------------------------------------
+# DATABASE INFO POPUP
+# -----------------------------------------------------
+def show_db_info(self):
+
+    try:
+        cur = self.conn.cursor()
+
+        contacts = cur.execute("SELECT COUNT(*) FROM contacts").fetchone()[0]
+        settings = cur.execute("SELECT COUNT(*) FROM settings").fetchone()[0]
+        logs = cur.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
+
+        msg = f"""
+Baza danych załadowana poprawnie
+
+Kontakty: {contacts}
+Ustawienia: {settings}
+Logi: {logs}
+
+Plik bazy:
+{self.conn}
+"""
+
+        self.popup("Status bazy danych", msg)
+
+    except Exception as e:
+
+        self.popup("Błąd bazy", str(e))
+
+
+FutureApp.show_db_info = show_db_info
+
+
+# -----------------------------------------------------
+# SAFE EXCEL LOADER
+# -----------------------------------------------------
+def safe_load_excel(self):
+
+    if not self.current_file:
+
+        self.popup(
+            "Brak pliku",
+            "Najpierw wybierz plik Excel"
+        )
+        return
+
+    if not os.path.exists(self.current_file):
+
+        self.popup(
+            "Błąd pliku",
+            "Plik Excel nie istnieje"
+        )
+        return
+
+    try:
+
+        wb = load_workbook(self.current_file)
+        ws = wb.active
+
+        data = []
+
+        for row in ws.iter_rows(values_only=True):
+            data.append(list(row))
+
+        if len(data) == 0:
+
+            self.popup(
+                "Błąd",
+                "Plik Excel jest pusty"
+            )
+            return
+
+        self.full_data = data
+        self.filtered_data = data
+
+        self.popup(
+            "Excel wczytany",
+            f"Wiersze: {len(data)-1}\nKolumny: {len(data[0])}"
+        )
+
+        self.build_table_view()
+
+        self.sm.current = "table"
+
+    except Exception as e:
+
+        self.popup(
+            "Crash Excel",
+            str(e)
+        )
+
+
+FutureApp.load_excel = safe_load_excel
+
+
+# -----------------------------------------------------
+# TABLE VIEW BUILDER
+# -----------------------------------------------------
+def build_table_view(self):
+
+    try:
+
+        self.table.clear_widgets()
+
+        root = BoxLayout(orientation="vertical")
+
+        scroll = ScrollView()
+
+        cols = len(self.filtered_data[0])
+
+        grid = GridLayout(
+            cols=cols,
+            spacing=2,
+            size_hint_y=None
+        )
+
+        grid.bind(minimum_height=grid.setter('height'))
+
+        for r, row in enumerate(self.filtered_data):
+
+            for cell in row:
+
+                text = "" if cell is None else str(cell)
+
+                lbl = Label(
+                    text=text,
+                    size_hint_y=None,
+                    height=dp(40)
+                )
+
+                if r == 0:
+
+                    lbl.bold = True
+                    lbl.color = (1,1,1,1)
+                    lbl.canvas.before.clear()
+
+                    with lbl.canvas.before:
+                        from kivy.graphics import Color, Rectangle
+                        Color(0.26,0.44,0.78,1)
+                        lbl.rect = Rectangle(pos=lbl.pos, size=lbl.size)
+
+                    def update_rect(instance, value):
+                        instance.rect.pos = instance.pos
+                        instance.rect.size = instance.size
+
+                    lbl.bind(pos=update_rect, size=update_rect)
+
+                grid.add_widget(lbl)
+
+        scroll.add_widget(grid)
+        root.add_widget(scroll)
+
+        btn_back = PremiumButton(text="⬅ Powrót")
+
+        btn_back.bind(
+            on_press=lambda x: setattr(self.sm, "current", "home")
+        )
+
+        root.add_widget(btn_back)
+
+        self.table.add_widget(root)
+
+    except Exception as e:
+
+        self.popup(
+            "Błąd tabeli",
+            str(e)
+        )
+
+
+FutureApp.build_table_view = build_table_view
+
+
+# -----------------------------------------------------
+# EXCEL STYLE PATCH
+# -----------------------------------------------------
+def improved_excel_style(self, ws):
+
+    thick = Side(style="thick")
+    thin = Side(style="thin")
+
+    max_r = ws.max_row
+    max_c = ws.max_column
+
+    for r in range(1, max_r+1):
+        for c in range(1, max_c+1):
+
+            cell = ws.cell(r,c)
+
+            if r == 1:
+
+                cell.font = Font(bold=True)
+                cell.fill = HEADER_FILL
+
+            cell.border = Border(
+                left=thick if c==1 else thin,
+                right=thick if c==max_c else thin,
+                top=thick if r==1 else thin,
+                bottom=thick if r==max_r else thin
+            )
+
+            cell.alignment = Alignment(
+                horizontal="center",
+                vertical="center"
+            )
+
+    # AUTO WIDTH
+
+    for col in ws.columns:
+
+        max_len = 0
+        letter = col[0].column_letter
+
+        for cell in col:
+
+            if cell.value:
+                max_len = max(max_len, len(str(cell.value)))
+
+        ws.column_dimensions[letter].width = max_len + 4
+
+
+FutureApp.apply_excel_styling = improved_excel_style
+
+
+# -----------------------------------------------------
+# SAFE CONTACT IMPORT
+# -----------------------------------------------------
+def safe_import_contacts(self, file):
+
+    try:
+
+        wb = load_workbook(file)
+        ws = wb.active
+
+        added = 0
+
+        for row in ws.iter_rows(min_row=2, values_only=True):
+
+            if not row:
+                continue
+
+            name = str(row[0])
+            surname = str(row[1])
+            email = str(row[2])
+
+            try:
+
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO contacts VALUES (?,?,?)",
+                    (name,surname,email)
+                )
+
+                added += 1
+
+            except:
+                pass
+
+        self.conn.commit()
+
+        self.popup(
+            "Import kontaktów",
+            f"Dodano {added} rekordów"
+        )
+
+        self.show_db_info()
+
+    except Exception as e:
+
+        self.popup(
+            "Błąd importu",
+            str(e)
+        )
+
+
+FutureApp.import_contacts_to_db = safe_import_contacts
+
+
+# -----------------------------------------------------
+# FINAL START MESSAGE
+# -----------------------------------------------------
+print("PATCH v9.5 LOADED")
+
 if __name__ == "__main__":
     FutureApp().run()
