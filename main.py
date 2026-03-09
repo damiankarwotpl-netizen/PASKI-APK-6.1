@@ -256,10 +256,12 @@ class FutureApp(App):
             ext = ".xlsx" if mode != "attachment" else "_" + os.urandom(2).hex()
             loc = Path(self.user_data_dir) / f"ptr_{mode}{ext}"
             with open(loc, "wb") as f:
-                while True:
-                    b = stream.read(bytearray(16384))
-                    if b == -1: break
-                    f.write(b)
+                    buf = bytearray(16384)
+                    while True:
+                        n = stream.read(buf)
+                        if n == -1:
+                           break
+                        f.write(buf[:n])
             stream.close()
             if mode == "data": self.process_excel(loc)
             elif mode == "book": self.process_book(loc)
