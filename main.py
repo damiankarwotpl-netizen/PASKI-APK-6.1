@@ -331,6 +331,239 @@ class FutureApp(App):
         txt = "\n".join([f"{d}: {m}" for m, d in logs]); self.msg("Historia", txt if txt else "Brak logów.")
     def msg(self, t, txt): Popup(title=t, content=Label(text=txt, halign="center"), size_hint=(0.8, 0.4)).open()
 
+
+# =========================
+# FUTURE APP STABILITY PATCH
+# =========================
+
+def _safe_render_table_view(self, data):
+    from kivy.uix.boxlayout import BoxLayout
+    from kivy.uix.textinput import TextInput
+    from kivy.uix.scrollview import ScrollView
+    from kivy.uix.gridlayout import GridLayout
+    from kivy.uix.label import Label
+    from kivy.uix.button import Button
+    from kivy.metrics import dp
+
+    if not data or len(data) < 2:
+        self.msg("Błąd", "Excel nie zawiera danych.")
+        return
+
+    self.table_scr.clear_widgets()
+
+    root = BoxLayout(orientation="vertical", padding=dp(5))
+
+    search = TextInput(
+        hint_text="Szukaj osoby...",
+        size_hint_y=None,
+        height=dp(50),
+        multiline=False
+    )
+
+    root.add_widget(search)
+
+    self.grid = GridLayout(
+        cols=4,
+        size_hint_y=None,
+        spacing=dp(2)
+    )
+
+    self.grid.bind(minimum_height=self.grid.setter('height'))
+
+    def populate(rows):
+        self.grid.clear_widgets()
+
+        for r in rows[:200]:
+
+            row = list(r) + ["", "", ""]
+
+            for cell in row[:3]:
+                self.grid.add_widget(
+                    Label(
+                        text=str(cell)[:15],
+                        font_size=11,
+                        size_hint_y=None,
+                        height=dp(40)
+                    )
+                )
+
+            btn = Button(
+                text="ZAPISZ",
+                size_hint=(None, None),
+                size=(dp(80), dp(40)),
+                background_color=(0,0.6,0.2,1)
+            )
+
+            btn.bind(on_press=lambda x, row=r: self.single_export(row))
+            self.grid.add_widget(btn)
+
+    populate(data[1:])
+
+    def do_search(instance, value):
+
+        value = value.lower()
+
+        filtered = [
+            r for r in data[1:]
+            if any(value in str(c).lower() for c in r if c)
+        ]
+
+        populate(filtered)
+
+    search.bind(text=do_search)
+
+    sv = ScrollView()
+    sv.add_widget(self.grid)
+
+    root.add_widget(sv)
+
+    self.prog = ProgressBar(
+        max=100,
+        size_hint_y=None,
+        height=dp(10)
+    )
+
+    root.add_widget(self.prog)
+
+    bot = BoxLayout(
+        size_hint_y=None,
+        height=dp(100),
+        orientation="vertical",
+        spacing=dp(2)
+    )
+
+    bot.add_widget(Button(text="EKSPORTUJ WSZYSTKO", on_press=self.mass_export))
+    bot.add_widget(Button(text="WYBIERZ KOLUMNY", on_press=self.column_popup))
+    bot.add_widget(Button(text="POWRÓT", on_press=lambda x: setattr(self.sm,"current","home")))
+
+    root.add_widget(bot)
+
+    self.table_scr.add_widget(root)
+
+
+def _safe_att_popup(self, _):
+
+    from kivy.uix.boxlayout import BoxLayout
+    from kivy.uix.button import Button
+    from kivy.uix.label import Label
+    from kivy.uix.popup import Popup
+    from kivy.metrics import dp
+
+    box = BoxLayout(
+        orientation="vertical",
+        padding=10,
+        spacing=10
+    )
+
+    popup = Popup(
+        title="Załączniki",
+        content=box,
+        size_hint=(0.8,0.6)
+    )
+
+    for ap in self.global_attachments:
+
+        row = BoxLayout(size_hint_y=None,height=dp(40))
+
+        row.add_widget(Label(text=os.path.basename(ap)[:25]))
+
+        btn = Button(text="USUŃ")
+
+        btn.bind(on_press=lambda x,p=ap: self.remove_att(p))
+
+        row.add_widget(btn)
+
+        box.add_widget(row)
+
+    box.add_widget(Button(
+        text="DODAJ DOKUMENT",
+        on_press=lambda x: self.pick_file("extra")
+    ))
+
+    box.add_widget(Button(
+        text="ZAMKNIJ",
+        on_press=lambda x: popup.dismiss()
+    ))
+
+    popup.open()
+
+
+def _safe_import_contacts(self, p):
+
+    try:
+        from openpyxl import load_workbook
+
+        wb = load_workbook(str(p), data_only=True)
+
+        ws = wb.active
+
+        rows = list(ws.iter_rows(values_only=True))
+
+        added = 0
+
+        for r in rows[1:]:
+
+            if not r:
+                continue
+
+            name = str(r[0]).lower().strip() if len(r) > 0 else ""
+            surname = str(r[1]).lower().strip() if len(r) > 1 else ""
+            email = str(r[2]).strip() if len(r) > 2 else ""
+
+            if email:
+
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO contacts VALUES(?,?,?)",
+                    (name,surname,email)
+                )
+
+                added += 1
+
+        self.conn.commit()
+
+        self.msg(
+            "Baza zaimportowana",
+            f"Dodano kontaktów: {added}"
+        )
+
+    except Exception as e:
+
+        self.msg("Błąd importu", str(e))
+
+
+def _safe_load_excel(self, path):
+
+    try:
+
+        from openpyxl import load_workbook
+
+        wb = load_workbook(str(path), data_only=True)
+
+        ws = wb.active
+
+        self.full_data = [
+            [("" if v is None else str(v)) for v in r]
+            for r in ws.iter_rows(values_only=True)
+        ]
+
+        rows = max(0,len(self.full_data)-1)
+        cols = len(self.full_data[0]) if self.full_data else 0
+
+        self.msg(
+            "Excel wczytany",
+            f"Wiersze: {rows}\nKolumny: {cols}"
+        )
+
+    except Exception as e:
+
+        self.msg("Błąd Excela", str(e))
+
+
+# NADPISANIE FUNKCJI APLIKACJI
+FutureApp.render_table_view = _safe_render_table_view
+FutureApp.att_manager_popup = _safe_att_popup
+FutureApp.import_contacts = _safe_import_contacts
+FutureApp.load_excel_to_memory = _safe_load_excel
 if __name__ == "__main__":
     try:
         FutureApp().run()
