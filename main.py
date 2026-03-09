@@ -144,46 +144,92 @@ class FutureApp(App):
         lt.add_widget(Button(text="POWRÓT", on_press=lambda x: setattr(self.sm, "current", "email")))
         self.tmpl_scr.add_widget(lt)
 
-    # ========================================================
-    # STABILNY PICKER (Z TWOJEJ WERSJI - BUFOR BAJTOWY [B])
-    # ========================================================
     def pick_file(self, mode):
-        if platform != "android": self.msg("Błąd", "Funkcja tylko na Android."); return
-        from jnius import autoclass; from android import activity
-        Intent = autoclass("android.content.Intent")
-        intent = Intent(Intent.ACTION_GET_CONTENT); intent.setType("*/*"); intent.addCategory(Intent.CATEGORY_OPENABLE)
-        
-        def on_activity_result(request_code, result_code, intent_data):
-            if intent_data:
-                try:
-                    uri = intent_data.getData()
-                    resolver = autoclass("org.kivy.android.PythonActivity").mActivity.getContentResolver()
-                    stream = resolver.openInputStream(uri)
-                    
-                    filename = "data_v11.xlsx" if mode == "data" else ("book_v11.xlsx" if mode == "book" else f"extra_{os.urandom(2).hex()}.pdf")
-                    local_path = Path(self.user_data_dir) / filename
-                    
-                    # --- KLUCZOWY PATCH: NATIVE BYTE ARRAY ---
-                    j_buf = autoclass('[B')(16384) 
-                    with open(local_path, "wb") as f:
-                        while True:
-                            r = stream.read(j_buf)
-                            if r <= 0: break
-                            f.write(bytes(j_buf)[:r])
-                    stream.close()
 
-                    if mode == "data": 
-                        self.current_file = local_path; Clock.schedule_once(lambda x: setattr(self.home_status, "text", "Załadowano Excel."))
-                    elif mode == "book": 
-                        self.import_contacts_to_db(local_path)
-                    elif mode == "extra": 
-                        self.global_attachments.append(str(local_path)); self.update_att_status()
-                except Exception as e: Clock.schedule_once(lambda x: self.msg("Błąd", str(e)))
-            activity.unbind(on_activity_result=on_activity_result)
-            
-        activity.bind(on_activity_result=on_activity_result)
-        autoclass("org.kivy.android.PythonActivity").mActivity.startActivityForResult(intent, 1001)
+    if platform != "android":
+        self.msg("Błąd", "Funkcja tylko na Android")
+        return
 
+    from jnius import autoclass
+    from android import activity
+
+    Intent = autoclass("android.content.Intent")
+    PythonActivity = autoclass("org.kivy.android.PythonActivity")
+
+    intent = Intent(Intent.ACTION_GET_CONTENT)
+    intent.setType("*/*")
+    intent.addCategory(Intent.CATEGORY_OPENABLE)
+
+    REQUEST_CODE = 1234
+
+    def on_activity_result(request_code, result_code, intent_data):
+
+        if request_code != REQUEST_CODE:
+            return
+
+        activity.unbind(on_activity_result=on_activity_result)
+
+        if intent_data is None:
+            Clock.schedule_once(lambda x: self.msg("Błąd", "Nie wybrano pliku"))
+            return
+
+        try:
+
+            uri = intent_data.getData()
+            resolver = PythonActivity.mActivity.getContentResolver()
+            stream = resolver.openInputStream(uri)
+
+            if stream is None:
+                raise Exception("Nie można otworzyć pliku")
+
+            if mode == "data":
+                filename = "data_v11.xlsx"
+            elif mode == "book":
+                filename = "book_v11.xlsx"
+            else:
+                filename = f"extra_{os.urandom(2).hex()}"
+
+            local_path = Path(self.user_data_dir) / filename
+
+            j_buf = autoclass('[B')(16384)
+
+            with open(local_path, "wb") as f:
+
+                while True:
+                    r = stream.read(j_buf)
+                    if r == -1:
+                        break
+
+                    f.write(bytes(j_buf[:r]))
+
+            stream.close()
+
+            if mode == "data":
+
+                self.current_file = local_path
+
+                Clock.schedule_once(
+                    lambda x: setattr(self.home_status, "text", "Excel załadowany")
+                )
+
+            elif mode == "book":
+
+                Clock.schedule_once(
+                    lambda x: self.import_contacts_to_db(local_path)
+                )
+
+            elif mode == "extra":
+
+                self.global_attachments.append(str(local_path))
+                Clock.schedule_once(lambda x: self.update_att_status())
+
+        except Exception as e:
+
+            Clock.schedule_once(lambda x: self.msg("Błąd pliku", str(e)))
+
+    activity.bind(on_activity_result=on_activity_result)
+
+    PythonActivity.mActivity.startActivityForResult(intent, REQUEST_CODE)
     # ========================================================
     # WGRYWANIE I TABELA (Z TWOJEJ STABILNEJ WERSJI)
     # ========================================================
