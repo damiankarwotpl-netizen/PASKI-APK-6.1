@@ -326,398 +326,441 @@ class FutureApp(App):
     def msg(self, t, txt): Popup(title=t, content=Label(text=txt, halign="center"), size_hint=(0.8, 0.4)).open()
 
 
-# ==================================================
-# MEGA PATCH v12 - FULL FIX + TEST PANEL
-# ==================================================
+# =========================================
+# MEGA PATCH v15 - DATABASE ENGINE
+# =========================================
 
-from kivy.metrics import dp
+from kivy.clock import Clock
+from kivy.app import App
 from kivy.uix.popup import Popup
 from kivy.uix.label import Label
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
+from kivy.uix.textinput import TextInput
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.screenmanager import Screen
-from kivy.clock import Clock
+
+import csv
+import os
+import sqlite3
 
 
-# ==================================================
+# =====================
 # SAFE POPUP
-# ==================================================
+# =====================
 
-def safe_popup(title,text):
+def popup(title, text):
 
-    box = BoxLayout(orientation="vertical",padding=20,spacing=10)
+    box = BoxLayout(orientation="vertical", padding=10, spacing=10)
 
     box.add_widget(Label(text=str(text)))
 
-    btn = Button(text="OK",size_hint_y=None,height=dp(45))
-    box.add_widget(btn)
+    btn = Button(text="OK", size_hint_y=None, height=50)
 
-    p = Popup(title=title,content=box,size_hint=(0.8,0.6))
+    p = Popup(
+        title=title,
+        content=box,
+        size_hint=(0.8,0.6)
+    )
+
     btn.bind(on_press=p.dismiss)
+
+    box.add_widget(btn)
 
     p.open()
 
 
-# ==================================================
-# SAFE EXCEL LOADER
-# ==================================================
+# =====================
+# DEBUG LOGGER
+# =====================
 
-def patched_go_to_table(self,*_):
-
-    if not getattr(self,"current_file",None):
-
-        safe_popup("Błąd","Najpierw wczytaj plik Excel.")
-        return
+def log_error(e):
 
     try:
 
-        from openpyxl import load_workbook
+        with open("debug_log.txt","a") as f:
+            f.write(str(e)+"\n")
 
-        wb = load_workbook(str(self.current_file),data_only=True)
-
-        ws = wb.active
-
-        data = []
-
-        for row in ws.iter_rows(values_only=True):
-
-            r=[]
-
-            for c in row:
-
-                if c is None:
-                    r.append("")
-                else:
-                    r.append(str(c))
-
-            data.append(r)
-
-        if len(data) < 2:
-
-            safe_popup("Excel","Plik nie zawiera danych.")
-            return
-
-        self.full_data = data
-
-        patched_draw_table(self,data)
-
-        self.sm.current = "table"
-
-        cols = len(data[0])
-        rows = len(data) - 1
-
-        safe_popup(
-            "Baza załadowana",
-            f"✔ kompatybilny Excel\n\n"
-            f"kolumny: {cols}\n"
-            f"rekordy: {rows}"
-        )
-
-    except Exception as e:
-
-        safe_popup("Excel error",str(e))
+    except:
+        pass
 
 
-# ==================================================
-# SAFE TABLE RENDER
-# ==================================================
+# =====================
+# LOAD DATABASE FILE
+# =====================
 
-def patched_draw_table(self,data):
+def load_database_file(self, path):
 
     try:
 
-        self.grid.clear_widgets()
+        if path.endswith(".csv"):
 
-        if not data:
-            safe_popup("Tabela","Brak danych.")
+            data=[]
+
+            with open(path,encoding="utf8") as f:
+                reader=csv.reader(f)
+
+                for r in reader:
+                    data.append(r)
+
+            self.full_data=data
+
+            popup("CSV","Załadowano plik CSV")
+
             return
 
-        cols = max(1,len(data[0]))
+        if path.endswith(".db"):
 
-        self.grid.cols = cols + 1
+            conn=sqlite3.connect(path)
 
-        limit = min(len(data),120)
+            c=conn.cursor()
 
-        for r in data[1:limit]:
+            tables=c.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
 
-            row=list(r)
+            if not tables:
 
-            while len(row) < cols:
-                row.append("")
+                popup("SQLite","Brak tabel")
+                return
 
-            for cell in row:
+            table=tables[0][0]
 
-                self.grid.add_widget(Label(
-                    text=str(cell)[:20],
-                    size_hint_y=None,
-                    height=dp(40),
-                    font_size=12
-                ))
+            rows=c.execute(f"SELECT * FROM {table}").fetchall()
 
-            btn = Button(
-                text="EXPORT",
-                size_hint=(None,None),
-                size=(dp(90),dp(40))
+            self.full_data=[list(r) for r in rows]
+
+            popup("SQLite",f"Tabela: {table}")
+
+            return
+
+        if path.endswith(".xlsx"):
+
+            popup(
+                "XLSX",
+                "Obsługa XLSX wymaga openpyxl"
             )
 
-            btn.bind(on_press=lambda x,row=row: patched_export(self,row))
-
-            self.grid.add_widget(btn)
-
     except Exception as e:
 
-        safe_popup("Błąd tabeli",str(e))
+        log_error(e)
+
+        popup("Błąd",str(e))
 
 
-# ==================================================
-# EXPORT
-# ==================================================
+# =====================
+# TABLE VIEW
+# =====================
 
-def patched_export(self,row):
+def draw_table(self,data):
 
     try:
 
-        from openpyxl import Workbook
-        from pathlib import Path
-        from datetime import datetime
+        self.table_scr.clear_widgets()
 
-        wb = Workbook()
+        root=BoxLayout(orientation="vertical")
 
-        ws = wb.active
-
-        ws.append(self.full_data[0])
-        ws.append(row)
-
-        name = f"export_{datetime.now().strftime('%H%M%S')}.xlsx"
-
-        p = Path(self.user_data_dir)/name
-
-        wb.save(p)
-
-        safe_popup("Export OK",f"Plik zapisany:\n{name}")
-
-    except Exception as e:
-
-        safe_popup("Export error",str(e))
-
-
-# ==================================================
-# TEST FUNCTIONS
-# ==================================================
-
-def debug_excel(self,*_):
-
-    if not getattr(self,"full_data",None):
-
-        safe_popup("Excel","Brak danych w pamięci.")
-        return
-
-    rows=len(self.full_data)
-    cols=len(self.full_data[0])
-
-    headers=", ".join(self.full_data[0])
-
-    safe_popup(
-        "TEST EXCEL",
-        f"Wiersze: {rows}\n"
-        f"Kolumny: {cols}\n\n"
-        f"{headers}"
-    )
-
-
-def debug_database(self,*_):
-
-    try:
-
-        cur=self.conn.cursor()
-
-        tables=cur.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
-
-        txt=""
-
-        for t in tables:
-
-            c=cur.execute(
-                f"SELECT COUNT(*) FROM {t[0]}"
-            ).fetchone()[0]
-
-            txt+=f"{t[0]} : {c} rekordów\n"
-
-        if not txt:
-            txt="Brak tabel."
-
-        safe_popup("BAZA SQLITE",txt)
-
-    except Exception as e:
-
-        safe_popup("DB error",str(e))
-
-
-def debug_export(self,*_):
-
-    try:
-
-        from openpyxl import Workbook
-        from pathlib import Path
-
-        wb=Workbook()
-
-        ws=wb.active
-
-        ws.append(["TEST","EXPORT"])
-        ws.append(["OK","OK"])
-
-        p=Path(self.user_data_dir)/"debug_export.xlsx"
-
-        wb.save(p)
-
-        safe_popup("EXPORT TEST",f"Zapisano:\n{p}")
-
-    except Exception as e:
-
-        safe_popup("Export error",str(e))
-
-
-def debug_apk(self,*_):
-
-    import sys
-
-    txt=(
-        f"Python:\n{sys.version}\n\n"
-        f"user_data_dir:\n{self.user_data_dir}\n\n"
-        f"Excel:\n{getattr(self,'current_file',None)}"
-    )
-
-    safe_popup("INFO APK",txt)
-
-
-# ==================================================
-# TEST SCREEN
-# ==================================================
-
-class TestScreen(Screen):
-
-    def __init__(self,app,**kw):
-
-        super().__init__(**kw)
-
-        layout=BoxLayout(
-            orientation="vertical",
-            spacing=10,
-            padding=20
+        search=TextInput(
+            hint_text="Szukaj...",
+            size_hint_y=None,
+            height=50
         )
 
-        layout.add_widget(Button(
-            text="TEST EXCEL",
-            size_hint_y=None,
-            height=dp(50),
-            on_press=app.debug_excel
-        ))
+        root.add_widget(search)
 
-        layout.add_widget(Button(
-            text="TEST BAZY",
-            size_hint_y=None,
-            height=dp(50),
-            on_press=app.debug_database
-        ))
+        scroll=ScrollView()
 
-        layout.add_widget(Button(
-            text="TEST EXPORT",
-            size_hint_y=None,
-            height=dp(50),
-            on_press=app.debug_export
-        ))
+        grid=GridLayout(
+            cols=len(data[0]) if data else 1,
+            size_hint_y=None
+        )
 
-        layout.add_widget(Button(
-            text="INFO APK",
-            size_hint_y=None,
-            height=dp(50),
-            on_press=app.debug_apk
-        ))
+        grid.bind(minimum_height=grid.setter("height"))
 
-        layout.add_widget(Button(
-            text="POWRÓT",
-            size_hint_y=None,
-            height=dp(50),
-            on_press=lambda x:setattr(app.sm,"current","home")
-        ))
+        current=data[:]
 
-        self.add_widget(layout)
+        def render(rows):
 
+            grid.clear_widgets()
 
-# ==================================================
-# ADD TEST SCREEN
-# ==================================================
+            if not rows:
+                grid.add_widget(Label(text="Brak danych"))
+                return
 
-def add_test_screen(app):
+            for r in rows:
 
-    try:
+                for c in r:
 
-        ts=TestScreen(app,name="test")
+                    grid.add_widget(Label(
+                        text=str(c),
+                        size_hint_y=None,
+                        height=40
+                    ))
 
-        app.sm.add_widget(ts)
+        render(current)
+
+        def search_fn(instance,value):
+
+            if not value:
+
+                render(data)
+
+                return
+
+            res=[]
+
+            for r in data:
+
+                if any(value.lower() in str(c).lower() for c in r):
+
+                    res.append(r)
+
+            render(res)
+
+        search.bind(text=search_fn)
+
+        scroll.add_widget(grid)
+
+        root.add_widget(scroll)
+
+        bottom=BoxLayout(size_hint_y=None,height=60)
+
+        back=Button(text="Powrót")
+
+        back.bind(
+            on_press=lambda x:
+            setattr(self.sm,"current","home")
+        )
+
+        export=Button(text="Eksport CSV")
+
+        def export_csv(x):
+
+            try:
+
+                with open("export.csv","w",newline="",encoding="utf8") as f:
+
+                    w=csv.writer(f)
+
+                    for r in data:
+                        w.writerow(r)
+
+                popup("Eksport","Zapisano export.csv")
+
+            except Exception as e:
+
+                popup("Błąd",str(e))
+
+        export.bind(on_press=export_csv)
+
+        bottom.add_widget(back)
+        bottom.add_widget(export)
+
+        root.add_widget(bottom)
+
+        self.table_scr.add_widget(root)
 
     except Exception as e:
 
-        print("test screen error",e)
+        log_error(e)
+
+        popup("Crash tabeli",str(e))
 
 
-# ==================================================
-# ADD TEST BUTTON
-# ==================================================
+# =====================
+# OPEN TABLE
+# =====================
 
-def add_test_button(app):
+def go_to_table(self,*a):
 
     try:
 
-        layout=app.home_scr.children[0]
+        if not hasattr(self,"full_data") or not self.full_data:
 
-        layout.add_widget(Button(
-            text="TEST",
-            size_hint_y=None,
-            height=dp(50),
-            on_press=lambda x:setattr(app.sm,"current","test")
-        ))
+            popup(
+                "Brak danych",
+                "Najpierw wczytaj plik"
+            )
+
+            return
+
+        self.draw_table(self.full_data)
+
+        self.sm.current="table"
 
     except Exception as e:
 
-        print("test button error",e)
+        log_error(e)
+
+        popup("Błąd",str(e))
 
 
-# ==================================================
-# PATCH METHODS
-# ==================================================
+# =====================
+# DEBUG SCREEN
+# =====================
 
-FutureApp.go_to_table = patched_go_to_table
-FutureApp.draw_table = patched_draw_table
-FutureApp.single_export = patched_export
+def debug_screen(self):
 
-FutureApp.debug_excel = debug_excel
-FutureApp.debug_database = debug_database
-FutureApp.debug_export = debug_export
-FutureApp.debug_apk = debug_apk
+    if self.sm.has_screen("debug"):
+        return
+
+    s=Screen(name="debug")
+
+    root=BoxLayout(
+        orientation="vertical",
+        padding=20,
+        spacing=20
+    )
+
+    root.add_widget(Label(text="DEBUG PANEL"))
+
+    btn=Button(text="Info o bazie")
+
+    def info(x):
+
+        if hasattr(self,"full_data") and self.full_data:
+
+            r=len(self.full_data)
+            c=len(self.full_data[0])
+
+            popup(
+                "Baza",
+                f"Rekordy: {r}\nKolumny: {c}"
+            )
+
+        else:
+
+            popup("Baza","Brak danych")
+
+    btn.bind(on_press=info)
+
+    root.add_widget(btn)
+
+    back=Button(text="Powrót")
+
+    back.bind(
+        on_press=lambda x:
+        setattr(self.sm,"current","home")
+    )
+
+    root.add_widget(back)
+
+    s.add_widget(root)
+
+    self.sm.add_widget(s)
 
 
-# ==================================================
-# PATCH BUILD
-# ==================================================
+# =====================
+# TEST SCREEN
+# =====================
 
-_old_build = FutureApp.build
+def test_screen(self):
+
+    if self.sm.has_screen("test"):
+        return
+
+    s=Screen(name="test")
+
+    root=BoxLayout(
+        orientation="vertical",
+        padding=20,
+        spacing=20
+    )
+
+    root.add_widget(Label(text="TEST PANEL"))
+
+    btn=Button(text="Test Popup")
+
+    btn.bind(
+        on_press=lambda x:
+        popup("Test","Patch działa")
+    )
+
+    root.add_widget(btn)
+
+    debug=Button(text="DEBUG")
+
+    debug.bind(
+        on_press=lambda x:
+        setattr(self.sm,"current","debug")
+    )
+
+    root.add_widget(debug)
+
+    back=Button(text="Powrót")
+
+    back.bind(
+        on_press=lambda x:
+        setattr(self.sm,"current","home")
+    )
+
+    root.add_widget(back)
+
+    s.add_widget(root)
+
+    self.sm.add_widget(s)
 
 
-def patched_build(self):
+# =====================
+# ADD BUTTONS
+# =====================
 
-    root=_old_build(self)
+def add_buttons(self):
 
-    Clock.schedule_once(lambda dt:add_test_screen(self),0.5)
-    Clock.schedule_once(lambda dt:add_test_button(self),1)
+    try:
 
-    return root
+        layout=self.home_scr.children[0]
+
+        test=Button(text="TEST",size_hint_y=None,height=60)
+
+        test.bind(
+            on_press=lambda x:
+            setattr(self.sm,"current","test")
+        )
+
+        debug=Button(text="DEBUG",size_hint_y=None,height=60)
+
+        debug.bind(
+            on_press=lambda x:
+            setattr(self.sm,"current","debug")
+        )
+
+        layout.add_widget(test)
+        layout.add_widget(debug)
+
+    except:
+        pass
 
 
-FutureApp.build = patched_build
+# =====================
+# APPLY PATCH
+# =====================
+
+def apply_patch(dt):
+
+    try:
+
+        FutureApp.draw_table=draw_table
+        FutureApp.go_to_table=go_to_table
+        FutureApp.load_database_file=load_database_file
+
+        app=App.get_running_app()
+
+        if app:
+
+            debug_screen(app)
+            test_screen(app)
+            add_buttons(app)
+
+        print("MEGA PATCH v15 aktywny")
+
+    except Exception as e:
+
+        log_error(e)
+
+
+Clock.schedule_once(apply_patch,1)
 
 if __name__ == "__main__":
     try:
