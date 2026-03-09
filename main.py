@@ -367,5 +367,372 @@ class FutureApp(App):
     def msg(self, title, text):
         box = BoxLayout(orientation="vertical", padding=dp(20)); box.add_widget(Label(text=text, halign="center")); box.add_widget(Button(text="OK", on_press=lambda x: p.dismiss())); p = Popup(title=title, content=box, size_hint=(0.85, 0.45)); p.open()
 
+# ===== FUTURE PRO ULTIMATE PATCH =====
+
+def _future_pro_patch():
+
+    import os
+    import threading
+    import time
+    from pathlib import Path
+
+    from kivy.metrics import dp
+    from kivy.uix.boxlayout import BoxLayout
+    from kivy.uix.gridlayout import GridLayout
+    from kivy.uix.textinput import TextInput
+    from kivy.uix.label import Label
+    from kivy.uix.progressbar import ProgressBar
+    from kivy.uix.checkbox import CheckBox
+
+
+    # --------------------------------
+    # HOME PANEL
+    # --------------------------------
+
+    def setup_home_tiles(self):
+
+        root=BoxLayout(
+            orientation="vertical",
+            padding=dp(20),
+            spacing=dp(15)
+        )
+
+        root.add_widget(Label(
+            text="FUTURE MAILING PRO",
+            font_size="26sp",
+            bold=True
+        ))
+
+        grid=GridLayout(
+            cols=2,
+            spacing=dp(15),
+            size_hint_y=None
+        )
+
+        grid.bind(minimum_height=grid.setter("height"))
+
+        def tile(txt,act):
+
+            grid.add_widget(
+                PremiumButton(
+                    text=txt,
+                    height=dp(90),
+                    on_press=act
+                )
+            )
+
+        tile("WCZYTAJ ARKUSZ",lambda x:self.open_picker("data"))
+
+        tile("TABELA",lambda x:[
+            self.refresh_table(),
+            setattr(self.sm,"current","table")
+        ] if self.full_data else self.msg("!","Brak danych"))
+
+        tile("MAILING",lambda x:setattr(self.sm,"current","email"))
+
+        tile("KONTAKTY",lambda x:[
+            self.refresh_contacts_list(),
+            setattr(self.sm,"current","contacts")
+        ])
+
+        tile("SMTP",lambda x:setattr(self.sm,"current","smtp"))
+
+        tile("SZABLON",lambda x:setattr(self.sm,"current","tmpl"))
+
+        root.add_widget(grid)
+
+        self.screens["home"].clear_widgets()
+        self.screens["home"].add_widget(root)
+
+    FutureApp.setup_home_tiles=setup_home_tiles
+
+
+    # --------------------------------
+    # PICKER FIX
+    # --------------------------------
+
+    def open_picker_fixed(self,mode):
+
+        if platform!="android":
+            self.msg("!","Tylko Android")
+            return
+
+        from jnius import autoclass
+        from android import activity
+
+        PA=autoclass("org.kivy.android.PythonActivity")
+        Intent=autoclass("android.content.Intent")
+
+        intent=Intent(Intent.ACTION_GET_CONTENT)
+        intent.setType("*/*")
+
+        def cb(req,res,dt):
+
+            if not dt:
+                return
+
+            activity.unbind(on_activity_result=cb)
+
+            uri=dt.getData()
+
+            stream=PA.mActivity.getContentResolver().openInputStream(uri)
+
+            name=str(uri.getLastPathSegment())
+
+            ext=Path(name).suffix if "." in name else ".bin"
+
+            if mode!="attachment":
+                ext=".xlsx"
+
+            loc=Path(self.user_data_dir)/f"ptr_{mode}_{os.urandom(3).hex()}{ext}"
+
+            with open(loc,"wb") as f:
+
+                buf=bytearray(16384)
+
+                while True:
+
+                    n=stream.read(buf)
+
+                    if n<=0:
+                        break
+
+                    f.write(buf[:n])
+
+            stream.close()
+
+            if mode=="data":
+                self.process_excel(loc)
+
+            elif mode=="attachment":
+
+                self.global_attachments.append(str(loc))
+                self.update_stats()
+
+        activity.bind(on_activity_result=cb)
+
+        PA.mActivity.startActivityForResult(intent,1001)
+
+    FutureApp.open_picker=open_picker_fixed
+
+
+    # --------------------------------
+    # QUICK ATTACH MAILER
+    # --------------------------------
+
+    def open_quick_attach(self,*_):
+
+        root=BoxLayout(
+            orientation="vertical",
+            padding=dp(15),
+            spacing=dp(10)
+        )
+
+        root.add_widget(Label(
+            text="SZYBKA WYSYŁKA ZAŁĄCZNIKA",
+            font_size="20sp"
+        ))
+
+        root.add_widget(
+            PremiumButton(
+                text="DODAJ ZAŁĄCZNIK",
+                on_press=lambda x:self.open_picker("attachment")
+            )
+        )
+
+        ti_subject=TextInput(
+            hint_text="Temat",
+            size_hint_y=None,
+            height=dp(50)
+        )
+
+        root.add_widget(ti_subject)
+
+        ti_body=TextInput(
+            hint_text="Treść",
+            multiline=True,
+            size_hint_y=None,
+            height=dp(140)
+        )
+
+        root.add_widget(ti_body)
+
+        root.add_widget(
+            PremiumButton(
+                text="WYBIERZ ADRESY Z BAZY",
+                on_press=lambda x:setattr(self.sm,"current","contacts")
+            )
+        )
+
+        pb=ProgressBar(max=100)
+
+        root.add_widget(pb)
+
+        status=Label(text="")
+
+        root.add_widget(status)
+
+        def worker(emails,subj,body):
+
+            total=len(emails)
+            sent=0
+
+            for mail in emails:
+
+                try:
+
+                    self.send_email_engine(
+                        [],
+                        mail,
+                        subject_override=subj,
+                        body_override=body,
+                        fast_mode=True
+                    )
+
+                except Exception as e:
+
+                    print("SMTP ERROR",mail,e)
+
+                sent+=1
+
+                pb.value=(sent/total)*100
+
+                status.text=f"wysłano {sent}/{total}"
+
+        def send(_):
+
+            if not self.selected_emails:
+                self.msg("!","Brak adresów")
+                return
+
+            threading.Thread(
+                target=worker,
+                args=(
+                    list(self.selected_emails),
+                    ti_subject.text,
+                    ti_body.text
+                ),
+                daemon=True
+            ).start()
+
+        root.add_widget(
+            PremiumButton(
+                text="WYŚLIJ",
+                on_press=send
+            )
+        )
+
+        self.screens["email"].clear_widgets()
+        self.screens["email"].add_widget(root)
+
+    FutureApp.open_quick_attach=open_quick_attach
+
+
+    # --------------------------------
+    # CONTACTS PHONE
+    # --------------------------------
+
+    def refresh_contacts_phone(self,*args):
+
+        self.c_list.clear_widgets()
+
+        rows=self.conn.execute(
+            "SELECT name,surname,email,pesel,phone FROM contacts ORDER BY surname"
+        ).fetchall()
+
+        for n,s,e,p,ph in rows:
+
+            row=BoxLayout(
+                orientation="horizontal",
+                size_hint_y=None,
+                height=dp(100)
+            )
+
+            cb=CheckBox(
+                size_hint_x=None,
+                width=dp(50),
+                active=(e in self.selected_emails)
+            )
+
+            def toggle(inst,val,mail=e):
+
+                if val:
+
+                    if mail not in self.selected_emails:
+                        self.selected_emails.append(mail)
+
+                else:
+
+                    if mail in self.selected_emails:
+                        self.selected_emails.remove(mail)
+
+            cb.bind(active=toggle)
+
+            row.add_widget(cb)
+
+            info=BoxLayout(orientation="vertical")
+
+            info.add_widget(SafeLabel(text=f"{n} {s}",bold=True))
+
+            info.add_widget(
+                SafeLabel(
+                    text=f"{e} | PESEL:{p} | TEL:{ph}",
+                    font_size="12sp"
+                )
+            )
+
+            row.add_widget(info)
+
+            self.c_list.add_widget(row)
+
+    FutureApp.refresh_contacts_list=refresh_contacts_phone
+
+
+    # --------------------------------
+    # ADD BUTTON MAILING
+    # --------------------------------
+
+    old_setup=FutureApp.setup_email_ui
+
+    def setup_email_ui_new(self):
+
+        old_setup(self)
+
+        screen=self.screens["email"]
+
+        for child in screen.children:
+
+            if isinstance(child,BoxLayout):
+
+                child.add_widget(
+                    PremiumButton(
+                        text="WYŚLIJ ZAŁĄCZNIK",
+                        on_press=self.open_quick_attach
+                    )
+                )
+
+                break
+
+    FutureApp.setup_email_ui=setup_email_ui_new
+
+
+    # --------------------------------
+    # START HOME
+    # --------------------------------
+
+    old_add=FutureApp.add_screens
+
+    def add_screens_new(self):
+
+        old_add(self)
+
+        self.setup_home_tiles()
+
+    FutureApp.add_screens=add_screens_new
+
+
+_future_pro_patch()
+
+# ===== END PATCH =====
 
 if __name__ == "__main__": FutureApp().run()
