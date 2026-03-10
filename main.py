@@ -38,7 +38,7 @@ try:
 except ImportError:
     xlrd = None
 
-# Paleta kolorów Premium
+# Paleta kolorów
 COLOR_PRIMARY = (0.1, 0.5, 0.9, 1)
 COLOR_BG = (0.08, 0.1, 0.15, 1)
 COLOR_HEADER = (0.9, 0.9, 0.95, 1)
@@ -117,10 +117,10 @@ class FutureApp(App):
         self.setup_ui()
         for s in self.screens.values(): self.sm.add_widget(s)
 
-    # --- ZINTEGROWANNY PATCH OPEN_PICKER ---
+    # --- POPRAWIONY PICKER PLIKÓW ---
     def open_picker(self, mode):
         if platform != "android":
-            self.msg("!", "Tylko Android")
+            self.msg("!", "Funkcja dostępna tylko na Android")
             return
 
         from jnius import autoclass
@@ -128,47 +128,45 @@ class FutureApp(App):
 
         PA = autoclass("org.kivy.android.PythonActivity")
         Intent = autoclass("android.content.Intent")
-
         intent = Intent(Intent.ACTION_GET_CONTENT)
         intent.setType("*/*")
 
         def cb(req, res, dt):
-            if req != 1001:
-                return
-
+            if req != 1001: return
             activity.unbind(on_activity_result=cb)
 
-            if res != -1 or not dt:
-                return
+            if res == -1 and dt: # res -1 = RESULT_OK
+                uri = dt.getData()
+                resolver = PA.mActivity.getContentResolver()
+                cur = resolver.query(uri, None, None, None, None)
+                d_name = f"plik_{datetime.now().strftime('%H%M%S')}.xlsx"
+                
+                if cur and cur.moveToFirst():
+                    idx = cur.getColumnIndex("_display_name")
+                    if idx != -1: d_name = cur.getString(idx)
+                    cur.close()
 
-            uri = dt.getData()
-            cur = PA.mActivity.getContentResolver().query(uri, None, None, None, None)
-            d_name = "plik"
+                try:
+                    stream = resolver.openInputStream(uri)
+                    loc = Path(self.user_data_dir) / d_name
+                    with open(loc, "wb") as f:
+                        buffer = bytearray(16384)
+                        while True:
+                            bytes_read = stream.read(buffer)
+                            if bytes_read <= 0: break
+                            f.write(buffer[:bytes_read])
+                    stream.close()
 
-            if cur and cur.moveToFirst():
-                idx = cur.getColumnIndex("_display_name")
-                if idx != -1:
-                    d_name = cur.getString(idx)
-                cur.close()
-
-            stream = PA.mActivity.getContentResolver().openInputStream(uri)
-            loc = Path(self.user_data_dir) / d_name
-
-            with open(loc, "wb") as f:
-                data = stream.read()
-                f.write(bytes(data))
-
-            stream.close()
-
-            if mode == "data":
-                self.process_excel(loc)
-            elif mode == "book":
-                self.process_book(loc)
-            elif mode == "attachment":
-                self.global_attachments.append(str(loc))
-                self.update_stats()
-            elif mode == "special_send":
-                self.special_send_step_2_recipients(str(loc))
+                    # Po poprawnym wczytaniu pliku:
+                    if mode == "data": self.process_excel(loc)
+                    elif mode == "book": self.process_book(loc)
+                    elif mode == "attachment": 
+                        self.global_attachments.append(str(loc))
+                        self.update_stats()
+                    elif mode == "special_send":
+                        Clock.schedule_once(lambda dt: self.special_send_step_2_recipients(str(loc)))
+                except Exception as e:
+                    self.msg("Błąd", f"Nie udało się wczytać pliku: {str(e)}")
 
         activity.bind(on_activity_result=cb)
         PA.mActivity.startActivityForResult(intent, 1001)
@@ -191,16 +189,16 @@ class FutureApp(App):
             for n, s, e, ph in rows:
                 if v and v.lower() not in f"{n} {s} {e}".lower(): continue
                 r = BoxLayout(size_hint_y=None, height=dp(55))
-                cb = CheckBox(size_hint_x=None, width=dp(50), active=(e in self.selected_emails))
+                cb = CheckBox(size_hint_x=None, width=dp(50))
                 cb.bind(active=lambda inst, val, m=e: [self.selected_emails.append(m) if val else self.selected_emails.remove(m)])
                 r.add_widget(cb)
-                r.add_widget(Label(text=f"{n.title()} {s.title()}\n{e} | Tel: {ph if ph else '-'}", halign="left", text_size=(dp(250), None), font_size='12sp'))
+                r.add_widget(Label(text=f"{n.title()} {s.title()}\n{e}", halign="left", text_size=(dp(250), None), font_size='12sp'))
                 gl.add_widget(r)
         
         ti.bind(text=lambda i,v: refresh(v)); refresh()
         btn = PremiumButton(text="DALEJ (KROK 3)")
-        btn.bind(on_press=lambda x: [p.dismiss(), self.special_send_step_3_msg(file_path)] if self.selected_emails else self.msg("!", "Wybierz odbiorców!"))
-        box.add_widget(btn); p = Popup(title="Lista kontaktów", content=box, size_hint=(0.95,0.9)); p.open()
+        btn.bind(on_press=lambda x: [p.dismiss(), self.special_send_step_3_msg(file_path)] if self.selected_emails else self.msg("!", "Wybierz kogoś!"))
+        box.add_widget(btn); p = Popup(title="Wybór osób", content=box, size_hint=(0.95,0.9)); p.open()
 
     def special_send_step_3_msg(self, file_path):
         box = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
@@ -208,7 +206,7 @@ class FutureApp(App):
         ti_s = TextInput(hint_text="Temat maila", size_hint_y=None, height=dp(50), multiline=False)
         ti_b = TextInput(hint_text="Treść maila...", multiline=True)
         box.add_widget(ti_s); box.add_widget(ti_b)
-        btn = PremiumButton(text="WYŚLIJ PLIK (KROK 4)")
+        btn = PremiumButton(text="WYŚLIJ (KROK 4)")
         btn.bind(on_press=lambda x: [p.dismiss(), self.special_send_step_4_progress(file_path, self.selected_emails, ti_s.text, ti_b.text)] if ti_s.text and ti_b.text else self.msg("!", "Wpisz temat i treść!"))
         box.add_widget(btn); p = Popup(title="Wiadomość", content=box, size_hint=(0.95,0.85)); p.open()
 
@@ -231,9 +229,9 @@ class FutureApp(App):
                     try:
                         Clock.schedule_once(lambda dt: setattr(lbl, 'text', f"Wysyłka: {email}"))
                         info = self.conn.execute("SELECT name, surname FROM contacts WHERE email=?", (email,)).fetchone()
-                        nazwa = f"{info[0].title()} {info[1].title()}" if info else email.split('@')[0]
+                        base = f"{info[0].title()} {info[1].title()}" if info else email.split('@')[0]
                         if os.path.exists(file_path):
-                            shutil.copy(file_path, exp_dir / f"Kopia [{nazwa}] {os.path.basename(file_path)}")
+                            shutil.copy(file_path, exp_dir / f"Spec [{base}] {os.path.basename(file_path)}")
                         msg = EmailMessage(); msg["Subject"] = subject; msg["From"], msg["To"] = cfg['u'], email; msg.set_content(body)
                         with open(file_path, "rb") as f:
                             ct, _ = mimetypes.guess_type(file_path); mn, sb = (ct or 'application/octet-stream').split('/', 1)
@@ -247,18 +245,7 @@ class FutureApp(App):
             except Exception as e: Clock.schedule_once(lambda dt: [setattr(lbl, 'text', f"Błąd: {str(e)}"), setattr(btn_c, 'disabled', False)])
         threading.Thread(target=run, daemon=True).start()
 
-    # --- POZOSTAŁA LOGIKA ---
-    def test_smtp(self, _):
-        p = Path(self.user_data_dir) / "smtp.json"
-        if not p.exists(): self.msg("!", "Brak danych SMTP"); return
-        cfg = json.load(open(p))
-        def task():
-            try:
-                srv = smtplib.SMTP("smtp.gmail.com", 587, timeout=10); srv.starttls(); srv.login(cfg['u'], cfg['p']); srv.quit()
-                Clock.schedule_once(lambda dt: self.msg("OK", "Połączenie z Gmail poprawne"))
-            except Exception as e: Clock.schedule_once(lambda dt: self.msg("Błąd", str(e)))
-        threading.Thread(target=task, daemon=True).start()
-
+    # --- RESZTA FUNKCJI ---
     def setup_ui(self):
         l = BoxLayout(orientation="vertical", padding=dp(30), spacing=dp(15))
         l.add_widget(Label(text="FUTURE 22.4 ULTIMATE", font_size='26sp', bold=True, color=COLOR_PRIMARY))
@@ -316,7 +303,7 @@ class FutureApp(App):
             if v: self.send_email_engine(row, email)
             else: self.stats["skip"] +=1; Clock.schedule_once(lambda dt: self.process_mailing_queue())
         btns.add_widget(Button(text="WYŚLIJ", on_press=lambda x: dec(True), background_color=(0,0.7,0,1))); btns.add_widget(Button(text="POMIŃ", on_press=lambda x: dec(False), background_color=(0.7,0,0,1)))
-        box.add_widget(btns); pp = Popup(title="Potwierdzenie", content=box, size_hint=(0.9, 0.45)); pp.open()
+        box.add_widget(btns); pp = Popup(title="Weryfikacja", content=box, size_hint=(0.9, 0.45)); pp.open()
 
     def send_email_engine(self, row_data, target, fast_mode=False):
         def thread_task():
@@ -339,25 +326,65 @@ class FutureApp(App):
             except: Clock.schedule_once(lambda d: [self.update_stat("fail"), self.process_mailing_queue()])
         threading.Thread(target=thread_task, daemon=True).start()
 
-    def refresh_contacts_list(self, *args):
-        self.c_list.clear_widgets(); sv = self.ti_csearch.text.lower(); rows = self.conn.execute("SELECT name, surname, email, pesel, phone FROM contacts ORDER BY surname ASC").fetchall()
-        for n, s, e, p, ph in rows:
-            if sv and sv not in f"{n} {s} {e} {p} {ph}".lower(): continue
-            row = BoxLayout(size_hint_y=None, height=dp(110), padding=dp(8)); cb = CheckBox(size_hint_x=None, width=dp(50), active=(e in self.selected_emails))
-            cb.bind(active=lambda inst, val, m=e: [self.selected_emails.append(m) if val else self.selected_emails.remove(m)])
-            row.add_widget(cb); info = BoxLayout(orientation="vertical")
-            info.add_widget(Label(text=f"{n} {s}".title(), bold=True, halign="left", text_size=(dp(200), None)))
-            info.add_widget(Label(text=f"Email: {e}\nPESEL: {p if p else '-'} | Tel: {ph if ph else '-'}", font_size='12sp', color=(0.7,0.7,0.7,1), halign="left", text_size=(dp(200), None)))
-            row.add_widget(info); acts = BoxLayout(size_hint_x=None, width=dp(90), orientation="vertical", spacing=dp(4))
-            acts.add_widget(Button(text="Edytuj", on_press=lambda x, d=(n,s,e,p,ph): self.form_contact(*d))); acts.add_widget(Button(text="Usuń", background_color=(0.7,0,0,1), on_press=lambda x, name=n, sur=s: self.delete_contact(name,sur)))
-            row.add_widget(acts); self.c_list.add_widget(row)
+    def setup_report_ui(self):
+        l = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)); self.report_grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(12)); self.report_grid.bind(minimum_height=self.report_grid.setter('height')); sc = ScrollView(); sc.add_widget(self.report_grid); l.add_widget(Label(text="HISTORIA OPERACJI", bold=True, size_hint_y=None, height=dp(40))); l.add_widget(sc); l.add_widget(PremiumButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'home'))); self.screens["report"].add_widget(l)
 
     def refresh_reports(self, *args):
         self.report_grid.clear_widgets(); rows = self.conn.execute("SELECT date, ok, fail, skip, auto FROM reports ORDER BY id DESC").fetchall()
         for d, ok, fl, sk, au in rows:
             row = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(85), padding=dp(10))
             with row.canvas.before: Color(0.15, 0.2, 0.25, 1); r = Rectangle(pos=row.pos, size=row.size); row.bind(pos=lambda i,v,rect=r: setattr(rect, 'pos', v), size=lambda i,v,rect=r: setattr(rect, 'size', v))
-            row.add_widget(Label(text=f"Sesja: {d}", bold=True, color=COLOR_PRIMARY, halign="left", text_size=(dp(300), None))); row.add_widget(Label(text=f"Sukces: {ok} (Auto: {au}) | Błąd: {fl}", font_size='13sp', halign="left", text_size=(dp(300), None))); self.report_grid.add_widget(row)
+            row.add_widget(Label(text=f"Sesja: {d}", bold=True, color=COLOR_PRIMARY, halign="left", text_size=(dp(300), None))); row.add_widget(Label(text=f"Sukces: {ok} | Błąd: {fl}", font_size='13sp', halign="left", text_size=(dp(300), None))); self.report_grid.add_widget(row)
+
+    def setup_table_ui(self):
+        root = BoxLayout(orientation="vertical"); menu = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5), padding=dp(5))
+        self.ti_search = TextInput(hint_text="Szukaj...", multiline=False); self.ti_search.bind(text=self.filter_table); menu.add_widget(self.ti_search)
+        menu.add_widget(Button(text="Opcje", size_hint_x=0.2, on_press=self.popup_columns)); menu.add_widget(Button(text="Wróć", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
+        hs = ScrollView(size_hint_y=None, height=dp(55), do_scroll_y=False); self.table_header_layout = GridLayout(rows=1, size_hint=(None, None), height=dp(55)); hs.add_widget(self.table_header_layout)
+        ds = ScrollView(do_scroll_x=True, do_scroll_y=True); self.table_content_layout = GridLayout(size_hint=(None, None))
+        self.table_content_layout.bind(minimum_height=self.table_content_layout.setter('height'), minimum_width=self.table_content_layout.setter('width')); ds.add_widget(self.table_content_layout); ds.bind(scroll_x=lambda inst, val: setattr(hs, 'scroll_x', val))
+        root.add_widget(menu); root.add_widget(hs); root.add_widget(ds); self.screens["table"].add_widget(root)
+
+    def refresh_table(self):
+        self.table_content_layout.clear_widgets(); self.table_header_layout.clear_widgets()
+        if not self.filtered_data or not self.export_indices: return
+        w, h = dp(200), dp(55); headers = [self.full_data[0][i] for i in self.export_indices]
+        self.table_header_layout.cols = len(headers) + 1; self.table_header_layout.width = (len(headers) + 1) * w
+        for head in headers: self.table_header_layout.add_widget(ColorSafeLabel(text=str(head), bg_color=COLOR_HEADER, bold=True, size=(w,h), size_hint=(None,None)))
+        self.table_header_layout.add_widget(ColorSafeLabel(text="Akcja", bg_color=COLOR_HEADER, bold=True, size=(w,h), size_hint=(None,None)))
+        self.table_content_layout.cols = len(headers) + 1; self.table_content_layout.width = (len(headers)+1)*w; self.table_content_layout.height = (len(self.filtered_data)-1)*h
+        for r_idx, row in enumerate(self.filtered_data[1:]):
+            row_bg = COLOR_ROW_A if r_idx % 2 == 0 else COLOR_ROW_B
+            for c_idx in self.export_indices:
+                val = row[c_idx] if c_idx < len(row) else ""
+                self.table_content_layout.add_widget(ColorSafeLabel(text=str(val), bg_color=row_bg, size=(w,h), size_hint=(None,None)))
+            bt = Button(text="Eksport", size=(w,h), size_hint=(None,None)); bt.bind(on_press=lambda x, r=row: self.export_xlsx(r)); self.table_content_layout.add_widget(bt)
+
+    def setup_smtp_ui(self):
+        l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10)); self.ti_su = TextInput(hint_text="Gmail", multiline=False); self.ti_sp = TextInput(hint_text="Hasło", password=True)
+        p = Path(self.user_data_dir) / "smtp.json"
+        if p.exists(): d = json.load(open(p)); self.ti_su.text, self.ti_sp.text = d.get('u',''), d.get('p','')
+        def sv(_): [json.dump({'u':self.ti_su.text, 'p':self.ti_sp.text}, open(p, "w")), self.msg("OK", "Zapisano")]
+        l.add_widget(Label(text="USTAWIENIA GMAIL", bold=True)); l.add_widget(self.ti_su); l.add_widget(self.ti_sp); l.add_widget(PremiumButton(text="ZAPISZ", on_press=sv)); l.add_widget(PremiumButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'home'), background_color=(0.4, 0.4, 0.4, 1))); self.screens["smtp"].add_widget(l)
+
+    def setup_tmpl_ui(self):
+        l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10)); self.ti_ts = TextInput(hint_text="Temat {Imię}", size_hint_y=None, height=dp(45)); self.ti_tb = TextInput(hint_text="Treść...", multiline=True)
+        ts = self.conn.execute("SELECT val FROM settings WHERE key='t_sub'").fetchone(); tb = self.conn.execute("SELECT val FROM settings WHERE key='t_body'").fetchone()
+        if ts: self.ti_ts.text = ts[0]
+        if tb: self.ti_tb.text = tb[0]
+        def sv(_): [self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_sub', self.ti_ts.text)), self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_body', self.ti_tb.text)), self.conn.commit(), self.msg("OK", "Zapisano")]
+        l.add_widget(Label(text="SZABLON MAILA", bold=True)); l.add_widget(self.ti_ts); l.add_widget(self.ti_tb); l.add_widget(PremiumButton(text="ZAPISZ", on_press=sv)); l.add_widget(PremiumButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'email'))); self.screens["tmpl"].add_widget(l)
+
+    def setup_contacts_ui(self):
+        l = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(5)); top = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5)); self.ti_csearch = TextInput(hint_text="Szukaj...", multiline=False); self.ti_csearch.bind(text=self.refresh_contacts_list); top.add_widget(self.ti_csearch); top.add_widget(Button(text="+", size_hint_x=0.15, on_press=lambda x: self.form_contact())); top.add_widget(Button(text="Wróć", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'email'))); self.c_list = GridLayout(cols=1, size_hint_y=None, spacing=dp(10)); self.c_list.bind(minimum_height=self.c_list.setter('height')); sc = ScrollView(); sc.add_widget(self.c_list); btn_clr = Button(text="Wyczyść zaznaczenie", size_hint_y=None, height=dp(50), on_press=lambda x: [setattr(self, 'selected_emails', []), self.refresh_contacts_list()]); l.add_widget(top); l.add_widget(sc); l.add_widget(btn_clr); self.screens["contacts"].add_widget(l)
+
+    def refresh_contacts_list(self, *args):
+        self.c_list.clear_widgets(); sv = self.ti_csearch.text.lower(); rows = self.conn.execute("SELECT name, surname, email, pesel, phone FROM contacts ORDER BY surname ASC").fetchall()
+        for n, s, e, p, ph in rows:
+            if sv and sv not in f"{n} {s} {e} {p} {ph}".lower(): continue
+            row = BoxLayout(size_hint_y=None, height=dp(110), padding=dp(8)); cb = CheckBox(size_hint_x=None, width=dp(50), active=(e in self.selected_emails))
+            cb.bind(active=lambda inst, val, m=e: [self.selected_emails.append(m) if val else self.selected_emails.remove(m)])
+            row.add_widget(cb); info = BoxLayout(orientation="vertical"); info.add_widget(Label(text=f"{n} {s}".title(), bold=True, halign="left", text_size=(dp(200), None))); info.add_widget(Label(text=f"Email: {e}\nPESEL: {p if p else '-'}", font_size='12sp', color=(0.7,0.7,0.7,1), halign="left", text_size=(dp(200), None))); row.add_widget(info); acts = BoxLayout(size_hint_x=None, width=dp(90), orientation="vertical", spacing=dp(4)); acts.add_widget(Button(text="Edytuj", on_press=lambda x, d=(n,s,e,p,ph): self.form_contact(*d))); acts.add_widget(Button(text="Usuń", background_color=(0.7,0,0,1), on_press=lambda x, name=n, sur=s: self.delete_contact(name,sur))); row.add_widget(acts); self.c_list.add_widget(row)
 
     def process_excel(self, path):
         try:
@@ -391,58 +418,13 @@ class FutureApp(App):
                 if len(r) > iE and "@" in str(r[iE]):
                     pes_v = str(r[iP]) if (iP != -1 and len(r) > iP) else ""
                     self.conn.execute("INSERT OR REPLACE INTO contacts (name, surname, email, pesel, phone) VALUES (?,?,?,?,?)", (r[iN].lower(), r[iS].lower(), str(r[iE]).strip(), pes_v, ""))
-            self.conn.commit(); self.update_stats(); self.msg("OK", "Baza kontaktów zaktualizowana")
+            self.conn.commit(); self.update_stats(); self.msg("OK", "Baza zaktualizowana")
         except: self.msg("Błąd", "Błąd odczytu bazy")
 
     def export_xlsx(self, r):
         p = Path("/storage/emulated/0/Documents/FutureExport") if platform=="android" else Path("./exports"); p.mkdir(parents=True, exist_ok=True)
-        name = str(r[self.idx_name]).title(); surname = str(r[self.idx_surname]).title()
-        wb = Workbook(); ws = wb.active; ws.append([self.full_data[0][k] for k in self.export_indices]); ws.append([r[k] for k in self.export_indices]); self.style_xlsx(ws); wb.save(p/f"Raport_{name}_{surname}.xlsx"); self.msg("OK", f"Zapisano: {name} {surname}")
-
-    def setup_table_ui(self):
-        root = BoxLayout(orientation="vertical"); menu = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5), padding=dp(5))
-        self.ti_search = TextInput(hint_text="Szukaj...", multiline=False); self.ti_search.bind(text=self.filter_table); menu.add_widget(self.ti_search)
-        menu.add_widget(Button(text="Opcje", size_hint_x=0.2, on_press=self.popup_columns)); menu.add_widget(Button(text="Wróć", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
-        hs = ScrollView(size_hint_y=None, height=dp(55), do_scroll_y=False); self.table_header_layout = GridLayout(rows=1, size_hint=(None, None), height=dp(55)); hs.add_widget(self.table_header_layout)
-        ds = ScrollView(do_scroll_x=True, do_scroll_y=True); self.table_content_layout = GridLayout(size_hint=(None, None))
-        self.table_content_layout.bind(minimum_height=self.table_content_layout.setter('height'), minimum_width=self.table_content_layout.setter('width')); ds.add_widget(self.table_content_layout); ds.bind(scroll_x=lambda inst, val: setattr(hs, 'scroll_x', val))
-        root.add_widget(menu); root.add_widget(hs); root.add_widget(ds); self.screens["table"].add_widget(root)
-
-    def setup_smtp_ui(self):
-        l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10)); self.ti_su = TextInput(hint_text="Gmail", multiline=False); self.ti_sp = TextInput(hint_text="Hasło", password=True)
-        p = Path(self.user_data_dir) / "smtp.json"
-        if p.exists(): d = json.load(open(p)); self.ti_su.text, self.ti_sp.text = d.get('u',''), d.get('p','')
-        sv = lambda x: [json.dump({'u':self.ti_su.text, 'p':self.ti_sp.text}, open(p, "w")), self.msg("OK", "Zapisano")]
-        l.add_widget(Label(text="USTAWIENIA GMAIL", bold=True)); l.add_widget(self.ti_su); l.add_widget(self.ti_sp); l.add_widget(PremiumButton(text="ZAPISZ", on_press=sv)); l.add_widget(PremiumButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'home'), background_color=(0.4, 0.4, 0.4, 1))); self.screens["smtp"].add_widget(l)
-
-    def setup_tmpl_ui(self):
-        l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10)); self.ti_ts = TextInput(hint_text="Temat {Imię}", size_hint_y=None, height=dp(45)); self.ti_tb = TextInput(hint_text="Treść...", multiline=True)
-        ts = self.conn.execute("SELECT val FROM settings WHERE key='t_sub'").fetchone(); tb = self.conn.execute("SELECT val FROM settings WHERE key='t_body'").fetchone()
-        if ts: self.ti_ts.text = ts[0]
-        if tb: self.ti_tb.text = tb[0]
-        def sv(_): [self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_sub', self.ti_ts.text)), self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_body', self.ti_tb.text)), self.conn.commit(), self.msg("OK", "Zapisano")]
-        l.add_widget(Label(text="SZABLON MAILA", bold=True)); l.add_widget(self.ti_ts); l.add_widget(self.ti_tb); l.add_widget(PremiumButton(text="ZAPISZ", on_press=sv)); l.add_widget(PremiumButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'email'))); self.screens["tmpl"].add_widget(l)
-
-    def setup_report_ui(self):
-        l = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)); self.report_grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(12)); self.report_grid.bind(minimum_height=self.report_grid.setter('height')); sc = ScrollView(); sc.add_widget(self.report_grid); l.add_widget(Label(text="HISTORIA OPERACJI", bold=True, size_hint_y=None, height=dp(40))); l.add_widget(sc); l.add_widget(PremiumButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'home'))); self.screens["report"].add_widget(l)
-
-    def setup_contacts_ui(self):
-        l = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(5)); top = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5)); self.ti_csearch = TextInput(hint_text="Szukaj...", multiline=False); self.ti_csearch.bind(text=self.refresh_contacts_list); top.add_widget(self.ti_csearch); top.add_widget(Button(text="+", size_hint_x=0.15, on_press=lambda x: self.form_contact())); top.add_widget(Button(text="Wróć", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'email'))); self.c_list = GridLayout(cols=1, size_hint_y=None, spacing=dp(10)); self.c_list.bind(minimum_height=self.c_list.setter('height')); sc = ScrollView(); sc.add_widget(self.c_list); btn_clr = Button(text="Wyczyść zaznaczenie", size_hint_y=None, height=dp(50), on_press=lambda x: [setattr(self, 'selected_emails', []), self.refresh_contacts_list()]); l.add_widget(top); l.add_widget(sc); l.add_widget(btn_clr); self.screens["contacts"].add_widget(l)
-
-    def refresh_table(self):
-        self.table_content_layout.clear_widgets(); self.table_header_layout.clear_widgets()
-        if not self.filtered_data or not self.export_indices: return
-        w, h = dp(200), dp(55); headers = [self.full_data[0][i] for i in self.export_indices]
-        self.table_header_layout.cols = len(headers) + 1; self.table_header_layout.width = (len(headers) + 1) * w
-        for head in headers: self.table_header_layout.add_widget(ColorSafeLabel(text=str(head), bg_color=COLOR_HEADER, bold=True, size=(w,h), size_hint=(None,None)))
-        self.table_header_layout.add_widget(ColorSafeLabel(text="Akcja", bg_color=COLOR_HEADER, bold=True, size=(w,h), size_hint=(None,None)))
-        self.table_content_layout.cols = len(headers) + 1; self.table_content_layout.width = (len(headers)+1)*w; self.table_content_layout.height = (len(self.filtered_data)-1)*h
-        for r_idx, row in enumerate(self.filtered_data[1:]):
-            row_bg = COLOR_ROW_A if r_idx % 2 == 0 else COLOR_ROW_B
-            for c_idx in self.export_indices:
-                val = row[c_idx] if c_idx < len(row) else ""
-                self.table_content_layout.add_widget(ColorSafeLabel(text=str(val), bg_color=row_bg, size=(w,h), size_hint=(None,None)))
-            bt = Button(text="Eksport", size=(w,h), size_hint=(None,None)); bt.bind(on_press=lambda x, r=row: self.export_xlsx(r)); self.table_content_layout.add_widget(bt)
+        nx, sx = str(r[self.idx_name]).title(), str(r[self.idx_surname]).title()
+        wb = Workbook(); ws = wb.active; ws.append([self.full_data[0][k] for k in self.export_indices]); ws.append([r[k] for k in self.export_indices]); self.style_xlsx(ws); wb.save(p/f"Raport_{nx}_{sx}.xlsx"); self.msg("OK", f"Zapisano: {nx}")
 
     def style_xlsx(self, ws):
         if not load_workbook: return
@@ -450,15 +432,15 @@ class FutureApp(App):
         for r_idx, row in enumerate(ws.iter_rows(), start=1):
             for cell in row:
                 cell.border = Border(top=s, left=s, right=s, bottom=s); cell.alignment = c
-                if r_idx == 1: cell.font = Font(bold=True); cell.fill = PatternFill(start_color="DDEBF7", end_color="DDEBF7", fill_type="solid")
-        for col in ws.columns: ws.column_dimensions[col[0].column_letter].width = 20
+                if r_idx == 1: cell.font = Font(bold=True)
+        for col in ws.columns: ws.column_dimensions[col[0].column_letter].width = 18
 
     def popup_columns(self, _):
         if not self.full_data: return
         box = BoxLayout(orientation="vertical", padding=dp(15)); gr = GridLayout(cols=1, size_hint_y=None, spacing=dp(8)); gr.bind(minimum_height=gr.setter('height')); checks = []
         for i, h in enumerate(self.full_data[0]):
             r = BoxLayout(size_hint_y=None, height=dp(50)); cb = CheckBox(active=(i in self.export_indices), size_hint_x=None, width=dp(50)); checks.append((i, cb)); r.add_widget(cb); r.add_widget(Label(text=str(h))); gr.add_widget(r)
-        sc = ScrollView(); sc.add_widget(gr); box.add_widget(sc); box.add_widget(PremiumButton(text="ZATWIERDŹ", on_press=lambda x: [setattr(self, 'export_indices', [idx for idx, c in checks if c.active]), p.dismiss(), self.refresh_table()])); p = Popup(title="Kolumny", content=box, size_hint=(0.9, 0.9)); p.open()
+        sc = ScrollView(); sc.add_widget(gr); box.add_widget(sc); box.add_widget(PremiumButton(text="OK", on_press=lambda x: [setattr(self, 'export_indices', [idx for idx, c in checks if c.active]), p.dismiss(), self.refresh_table()])); p = Popup(title="Kolumny", content=box, size_hint=(0.9, 0.9)); p.open()
 
     def filter_table(self, ins, val):
         v = val.lower(); self.filtered_data = [self.full_data[0]] + [r for r in self.full_data[1:] if any(v in str(c).lower() for c in r)]; self.refresh_table()
