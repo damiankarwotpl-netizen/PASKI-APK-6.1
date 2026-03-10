@@ -38,7 +38,6 @@ try:
 except ImportError:
     xlrd = None
 
-# Paleta kolorów
 COLOR_PRIMARY = (0.1, 0.5, 0.9, 1)
 COLOR_BG = (0.08, 0.1, 0.15, 1)
 COLOR_HEADER = (0.9, 0.9, 0.95, 1)
@@ -80,6 +79,8 @@ class ReportScreen(Screen): pass
 
 class FutureApp(App):
     def build(self):
+        # POPRAWKA: Automatyczne przesuwanie widoku nad klawiaturę
+        Window.softinput_mode = "below_target"
         Window.clearcolor = COLOR_BG
         self.full_data = []; self.filtered_data = []; self.export_indices = []
         self.global_attachments = []; self.selected_emails = []; self.queue = []
@@ -153,6 +154,58 @@ class FutureApp(App):
 
     def start_special_send_flow(self, _): self.open_picker("special_send")
 
+    def special_send_step_2_recipients(self, file_path):
+        self.selected_emails = []
+        box = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
+        box.add_widget(Label(text="KROK 2: WYBIERZ ODBIORCÓW", bold=True, color=COLOR_PRIMARY, size_hint_y=None, height=dp(40)))
+        ti = TextInput(hint_text="Szukaj...", size_hint_y=None, height=dp(45), multiline=False); box.add_widget(ti)
+        sc = ScrollView(); gl = GridLayout(cols=1, size_hint_y=None, spacing=dp(5)); gl.bind(minimum_height=gl.setter('height')); sc.add_widget(gl); box.add_widget(sc)
+        def refresh(v=""):
+            gl.clear_widgets(); rows = self.conn.execute("SELECT name, surname, email FROM contacts").fetchall()
+            for n, s, e in rows:
+                if v and v.lower() not in f"{n} {s} {e}".lower(): continue
+                r = BoxLayout(size_hint_y=None, height=dp(55))
+                cb = CheckBox(size_hint_x=None, width=dp(50), active=(e in self.selected_emails))
+                cb.bind(active=lambda i, val, mail=e: self.selected_emails.append(mail) if val else self.selected_emails.remove(mail))
+                r.add_widget(cb); r.add_widget(Label(text=f"{n.title()} {s.title()}\n{e}", halign="left", text_size=(dp(250), None), font_size='12sp')); gl.add_widget(r)
+        ti.bind(text=lambda i,v: refresh(v)); refresh()
+        btn = PremiumButton(text="DALEJ"); btn.bind(on_press=lambda x: [p.dismiss(), self.special_send_step_3_msg(file_path)] if self.selected_emails else self.msg("!", "Wybierz kogoś!")); box.add_widget(btn); p = Popup(title="Odbiorcy", content=box, size_hint=(0.95,0.9)); p.open()
+
+    def special_send_step_3_msg(self, file_path):
+        box = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
+        sc = ScrollView(); gr = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(10)); gr.bind(minimum_height=gr.setter('height'))
+        ti_s = TextInput(hint_text="Temat", size_hint_y=None, height=dp(50)); ti_b = TextInput(hint_text="Treść...", multiline=True, size_hint_y=None, height=dp(300))
+        gr.add_widget(ti_s); gr.add_widget(ti_b); sc.add_widget(gr); box.add_widget(sc)
+        btn = PremiumButton(text="WYŚLIJ")
+        btn.bind(on_press=lambda x: [p.dismiss(), self.special_send_step_4_progress(file_path, self.selected_emails, ti_s.text, ti_b.text)] if ti_s.text and ti_b.text else self.msg("!", "Dane!")); box.add_widget(btn); p = Popup(title="Wiadomość", content=box, size_hint=(0.95,0.85)); p.open()
+
+    def special_send_step_4_progress(self, file_path, target_list, subject, body):
+        box = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(15))
+        lbl = Label(text="Inicjalizacja..."); pb = ProgressBar(max=len(target_list), value=0, size_hint_y=None, height=dp(30))
+        box.add_widget(lbl); box.add_widget(pb); btn_c = Button(text="ZAMKNIJ", size_hint_y=None, height=dp(50), disabled=True)
+        p = Popup(title="Wysyłka", content=box, size_hint=(0.85, 0.45), auto_dismiss=False); btn_c.bind(on_press=p.dismiss); box.add_widget(btn_c); p.open()
+        def run():
+            cfg_p = Path(self.user_data_dir) / "smtp.json"
+            if not cfg_p.exists(): Clock.schedule_once(lambda dt: self.msg("!", "Brak SMTP")); p.dismiss(); return
+            cfg = json.load(open(cfg_p)); ok, err = 0, 0
+            try:
+                srv = smtplib.SMTP("smtp.gmail.com", 587, timeout=15); srv.starttls(); srv.login(cfg['u'], cfg['p'])
+                for i, email in enumerate(target_list):
+                    try:
+                        Clock.schedule_once(lambda dt: setattr(lbl, 'text', f"Wysyłka: {email}"))
+                        msg = EmailMessage(); msg["Subject"], msg["From"], msg["To"] = subject, cfg['u'], email; msg.set_content(body)
+                        with open(file_path, "rb") as f:
+                            ct, _ = mimetypes.guess_type(file_path); mn, sb = (ct or 'application/octet-stream').split('/', 1)
+                            msg.add_attachment(f.read(), maintype=mn, subtype=sb, filename=os.path.basename(file_path))
+                        srv.send_message(msg); ok += 1
+                    except: err += 1
+                    Clock.schedule_once(lambda dt, idx=i+1: setattr(pb, 'value', idx))
+                srv.quit()
+                Clock.schedule_once(lambda dt: [setattr(lbl, 'text', f"KONIEC\nOK: {ok} | ERR: {err}"), setattr(btn_c, 'disabled', False)])
+                self.conn.execute("INSERT INTO reports (date, ok, fail, skip, auto, details) VALUES (?,?,?,?,?,?)", (f"{datetime.now().strftime('%m-%d %H:%M')} (PLIK)", ok, err, 0, 0, "Wysyłka specjalna")); self.conn.commit()
+            except Exception as e: Clock.schedule_once(lambda dt: [setattr(lbl, 'text', str(e)), setattr(btn_c, 'disabled', False)])
+        threading.Thread(target=run, daemon=True).start()
+
     def setup_ui(self):
         l = BoxLayout(orientation="vertical", padding=dp(30), spacing=dp(15))
         l.add_widget(Label(text="FUTURE 22.4 ULTIMATE", font_size='26sp', bold=True, color=COLOR_PRIMARY))
@@ -164,26 +217,6 @@ class FutureApp(App):
         btn("USTAWIENIA SMTP", lambda x: setattr(self.sm, 'current', 'smtp'))
         self.screens["home"].add_widget(l)
         self.setup_table_ui(); self.setup_email_ui(); self.setup_smtp_ui(); self.setup_tmpl_ui(); self.setup_contacts_ui(); self.setup_report_ui()
-
-    def setup_email_ui(self):
-        l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10))
-        auto_box = BoxLayout(size_hint_y=None, height=dp(45), spacing=dp(10))
-        self.cb_auto = CheckBox(size_hint_x=None, width=dp(45))
-        self.cb_auto.bind(active=lambda i, v: setattr(self, 'auto_send_mode', v))
-        auto_box.add_widget(self.cb_auto); auto_box.add_widget(Label(text="AUTO-WYSYŁKA", bold=True))
-        l.add_widget(auto_box)
-        self.lbl_stats = Label(text="Baza: 0", height=dp(30)); l.add_widget(self.lbl_stats)
-        self.pb_label = Label(text="Gotowy", height=dp(25)); self.pb = ProgressBar(max=100, height=dp(20))
-        l.add_widget(self.pb_label); l.add_widget(self.pb)
-        btn = lambda t, c: l.add_widget(PremiumButton(text=t, on_press=c))
-        btn("IMPORT KONTAKTÓW", lambda x: self.open_picker("book"))
-        btn("ZARZĄDZAJ BAZĄ", lambda x: [self.refresh_contacts_list(), setattr(self.sm, 'current', 'contacts')])
-        btn("EDYTUJ SZABLON", lambda x: setattr(self.sm, 'current', 'tmpl'))
-        btn("DODAJ ZAŁĄCZNIK", lambda x: self.open_picker("attachment"))
-        btn("WYŚLIJ PLIK", self.start_special_send_flow)
-        btn("START MASOWA WYSYŁKA", self.start_mass_mailing)
-        btn("POWRÓT", lambda x: setattr(self.sm, 'current', 'home'))
-        self.screens["email"].add_widget(l); self.update_stats()
 
     def start_mass_mailing(self, _):
         if not self.full_data: self.msg("!", "Danych brak!"); return
@@ -262,10 +295,10 @@ class FutureApp(App):
                 if ri == 1: cell.font = Font(bold=True); cell.fill = PatternFill(start_color="DDEBF7", end_color="DDEBF7", fill_type="solid")
                 elif ri % 2 == 0: cell.fill = PatternFill(start_color="F7F7F7", end_color="F7F7F7", fill_type="solid")
         for col in ws.columns:
-            max_l = 0; column_letter = col[0].column_letter
+            max_l = 0; col_l = col[0].column_letter
             for cell in col:
                 if cell.value: max_l = max(max_l, len(str(cell.value)))
-            ws.column_dimensions[column_letter].width = (max_l * 1.3) + 7
+            ws.column_dimensions[col_l].width = (max_l * 1.3) + 7
 
     def setup_report_ui(self):
         l = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)); self.report_grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(12))
@@ -317,10 +350,12 @@ class FutureApp(App):
             bt = Button(text="Eksport", size=(w,h), size_hint=(None,None)); bt.bind(on_press=lambda x, r=row: self.export_xlsx(r)); self.table_content_layout.add_widget(bt)
 
     def setup_smtp_ui(self):
-        l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10)); self.ti_su = TextInput(hint_text="Gmail"); self.ti_sp = TextInput(hint_text="Hasło", password=True)
+        sc = ScrollView(); l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10), size_hint_y=None); l.bind(minimum_height=l.setter('height'))
+        self.ti_su = TextInput(hint_text="Gmail", size_hint_y=None, height=dp(50)); self.ti_sp = TextInput(hint_text="Hasło", password=True, size_hint_y=None, height=dp(50))
         p = Path(self.user_data_dir) / "smtp.json"; d = json.load(open(p)) if p.exists() else {}; self.ti_su.text, self.ti_sp.text = d.get('u',''), d.get('p','')
-        sv = lambda x: [json.dump({'u':self.ti_su.text, 'p':self.ti_sp.text}, open(p, "w")), self.msg("OK", "Zapisano")]
-        l.add_widget(Label(text="USTAWIENIA GMAIL", bold=True)); l.add_widget(self.ti_su); l.add_widget(self.ti_sp); l.add_widget(PremiumButton(text="ZAPISZ", on_press=sv)); l.add_widget(PremiumButton(text="TESTUJ", on_press=self.test_smtp)); l.add_widget(PremiumButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'home'), background_color=(0.4, 0.4, 0.4, 1))); self.screens["smtp"].add_widget(l)
+        l.add_widget(Label(text="USTAWIENIA GMAIL", bold=True, size_hint_y=None, height=dp(40))); l.add_widget(self.ti_su); l.add_widget(self.ti_sp)
+        l.add_widget(PremiumButton(text="ZAPISZ", on_press=lambda x: [json.dump({'u':self.ti_su.text, 'p':self.ti_sp.text}, open(p, "w")), self.msg("OK", "Zapisano")])); l.add_widget(PremiumButton(text="TESTUJ", on_press=self.test_smtp)); l.add_widget(PremiumButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'home'), background_color=(0.4, 0.4, 0.4, 1)))
+        sc.add_widget(l); self.screens["smtp"].add_widget(sc)
 
     def refresh_contacts_list(self, *args):
         self.c_list.clear_widgets(); sv = self.ti_csearch.text.lower(); rows = self.conn.execute("SELECT name, surname, email, pesel, phone FROM contacts ORDER BY surname ASC").fetchall()
@@ -337,19 +372,20 @@ class FutureApp(App):
             row.add_widget(acts); self.c_list.add_widget(row)
 
     def form_contact(self, n="", s="", e="", pes="", ph=""):
-        b = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(8))
-        labels = ["Imię", "Nazwisko", "Email", "PESEL", "Telefon"]
-        vals = [n, s, e, pes, ph]; flds = []
+        root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(5))
+        sc = ScrollView(size_hint_y=0.8); b = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(8)); b.bind(minimum_height=b.setter('height'))
+        labels = ["Imię", "Nazwisko", "Email", "PESEL", "Telefon"]; vals = [n, s, e, pes, ph]; flds = []
         for i in range(5):
             box = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(60))
             box.add_widget(Label(text=labels[i], font_size='12sp', color=(0.7,0.7,0.7,1), halign='left', text_size=(dp(280), None)))
-            ti = TextInput(text=vals[i], multiline=False); box.add_widget(ti); flds.append(ti); b.add_widget(box)
+            ti = TextInput(text=vals[i], multiline=False, size_hint_y=None, height=dp(45)); box.add_widget(ti); flds.append(ti); b.add_widget(box)
+        sc.add_widget(b); root.add_widget(sc)
         def save(_):
             data = [f.text.strip().lower() if i<2 else f.text.strip() for i,f in enumerate(flds)]
             self.conn.execute("INSERT OR REPLACE INTO contacts VALUES (?,?,?,?,?)", data); self.conn.commit()
             px.dismiss(); self.refresh_contacts_list(); self.update_stats()
-        b.add_widget(PremiumButton(text="ZAPISZ", on_press=save))
-        px = Popup(title="Kontakt", content=b, size_hint=(0.9, 0.85)); px.open()
+        root.add_widget(PremiumButton(text="ZAPISZ", on_press=save, size_hint_y=0.15))
+        px = Popup(title="Kontakt", content=root, size_hint=(0.95, 0.9)); px.open()
 
     def delete_contact(self, n, s):
         def proceed_delete(_):
@@ -357,13 +393,15 @@ class FutureApp(App):
             self.conn.commit(); dx.dismiss(); self.refresh_contacts_list(); self.update_stats()
         btn = Button(text="USUŃ KONTAKT", background_color=(1,0,0,1), bold=True)
         btn.bind(on_press=proceed_delete)
-        dx = Popup(title="Potwierdź usunięcie", content=btn, size_hint=(0.8, 0.3)); dx.open()
+        dx = Popup(title="Potwierdź", content=btn, size_hint=(0.8, 0.25)); dx.open()
 
     def setup_tmpl_ui(self):
-        l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10)); self.ti_ts = TextInput(hint_text="Temat {Imię}"); self.ti_tb = TextInput(hint_text="Treść...", multiline=True)
+        sc = ScrollView(); l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10), size_hint_y=None); l.bind(minimum_height=l.setter('height'))
+        self.ti_ts = TextInput(hint_text="Temat {Imię}", size_hint_y=None, height=dp(50)); self.ti_tb = TextInput(hint_text="Treść...", multiline=True, size_hint_y=None, height=dp(400))
         ts = self.conn.execute("SELECT val FROM settings WHERE key='t_sub'").fetchone(); tb = self.conn.execute("SELECT val FROM settings WHERE key='t_body'").fetchone(); self.ti_ts.text = ts[0] if ts else ""; self.ti_tb.text = tb[0] if tb else ""
-        sv = lambda x: [self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_sub', self.ti_ts.text)), self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_body', self.ti_tb.text)), self.conn.commit(), self.msg("OK", "Zapisano")]
-        l.add_widget(Label(text="SZABLON MAILA", bold=True)); l.add_widget(self.ti_ts); l.add_widget(self.ti_tb); l.add_widget(PremiumButton(text="ZAPISZ", on_press=sv)); l.add_widget(PremiumButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'email'))); self.screens["tmpl"].add_widget(l)
+        l.add_widget(Label(text="SZABLON MAILA", bold=True, size_hint_y=None, height=dp(40))); l.add_widget(self.ti_ts); l.add_widget(self.ti_tb)
+        l.add_widget(PremiumButton(text="ZAPISZ", on_press=lambda x: [self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_sub', self.ti_ts.text)), self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_body', self.ti_tb.text)), self.conn.commit(), self.msg("OK", "Zapisano")])); l.add_widget(PremiumButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'email')))
+        sc.add_widget(l); self.screens["tmpl"].add_widget(sc)
 
     def setup_contacts_ui(self):
         l = BoxLayout(orientation="vertical", padding=dp(10)); top = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5))
