@@ -4,6 +4,7 @@ import sqlite3
 import threading
 import smtplib
 import mimetypes
+import shutil
 from datetime import datetime
 from pathlib import Path
 from email.message import EmailMessage
@@ -37,7 +38,7 @@ try:
 except ImportError:
     xlrd = None
 
-# Kolory
+# Paleta kolorów
 COLOR_PRIMARY = (0.1, 0.5, 0.9, 1)
 COLOR_BG = (0.08, 0.1, 0.15, 1)
 COLOR_HEADER = (0.9, 0.9, 0.95, 1)
@@ -80,12 +81,12 @@ class ReportScreen(Screen): pass
 class FutureApp(App):
     def build(self):
         Window.clearcolor = COLOR_BG
-        self.full_data = [] # Dane z arkusza plac
+        self.full_data = [] 
         self.filtered_data = []
         self.export_indices = []
         self.global_attachments = []
-        self.selected_emails = [] # Wybrani do wysylki specjalnej
-        self.queue = [] # Kolejka masowej wysylki
+        self.selected_emails = [] 
+        self.queue = [] 
         self.stats = {"ok": 0, "fail": 0, "skip": 0, "auto": 0}
         self.idx_name, self.idx_surname, self.idx_pesel = 0, 1, -1
         
@@ -122,15 +123,17 @@ class FutureApp(App):
         self.setup_ui()
         for s in self.screens.values(): self.sm.add_widget(s)
 
-    # --- KREATOR WYSYŁKI SPECJALNEJ (4 KROKI) ---
+    # ============================================
+    # KREATOR: WYŚLIJ PLIK (SPECJALNE)
+    # ============================================
     
     def start_special_send_flow(self, _):
-        self.open_picker("special_send") # KROK 1
+        self.open_picker("special_send") 
 
     def special_send_step_2_recipients(self, file_path):
         self.selected_emails = []
         box = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
-        box.add_widget(Label(text="KROK 2: WYBIERZ ODBIORCOW", bold=True, color=COLOR_PRIMARY, size_hint_y=None, height=dp(40)))
+        box.add_widget(Label(text="KROK 2: WYBIERZ ODBIORCÓW", bold=True, color=COLOR_PRIMARY, size_hint_y=None, height=dp(40)))
         ti = TextInput(hint_text="Szukaj kontaktu...", size_hint_y=None, height=dp(45), multiline=False)
         box.add_widget(ti)
         sc = ScrollView(); gl = GridLayout(cols=1, size_hint_y=None, spacing=dp(5)); gl.bind(minimum_height=gl.setter('height')); sc.add_widget(gl); box.add_widget(sc)
@@ -141,7 +144,7 @@ class FutureApp(App):
             for n, s, e, ph in rows:
                 if v and v.lower() not in f"{n} {s} {e}".lower(): continue
                 r = BoxLayout(size_hint_y=None, height=dp(55))
-                cb = CheckBox(size_hint_x=None, width=dp(50))
+                cb = CheckBox(size_hint_x=None, width=dp(50), active=(e in self.selected_emails))
                 cb.bind(active=lambda inst, val, m=e: [self.selected_emails.append(m) if val else self.selected_emails.remove(m)])
                 r.add_widget(cb)
                 r.add_widget(Label(text=f"{n.title()} {s.title()}\n{e} | Tel: {ph if ph else '-'}", halign="left", text_size=(dp(250), None), font_size='12sp'))
@@ -149,73 +152,83 @@ class FutureApp(App):
         
         ti.bind(text=lambda i,v: refresh(v)); refresh()
         btn = PremiumButton(text="DALEJ (KROK 3)")
-        btn.bind(on_press=lambda x: [p.dismiss(), self.special_send_step_3_msg(file_path)] if self.selected_emails else self.msg("!", "Wybierz kogos"))
-        box.add_widget(btn); p = Popup(title="Wybor odbiorcow", content=box, size_hint=(0.95,0.9)); p.open()
+        btn.bind(on_press=lambda x: [p.dismiss(), self.special_send_step_3_msg(file_path)] if self.selected_emails else self.msg("!", "Wybierz kogoś!"))
+        box.add_widget(btn); p = Popup(title="Wybór odbiorców", content=box, size_hint=(0.95,0.9)); p.open()
 
     def special_send_step_3_msg(self, file_path):
         box = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
-        box.add_widget(Label(text=f"KROK 3: EDYCJA TRESCI\nOdbiorcow: {len(self.selected_emails)}", color=COLOR_PRIMARY, size_hint_y=None, height=dp(50)))
-        ti_s = TextInput(hint_text="Temat maila", size_hint_y=None, height=dp(50), multiline=False)
-        ti_b = TextInput(hint_text="Tresc wiadomosci...", multiline=True)
+        box.add_widget(Label(text=f"KROK 3: TREŚĆ MAILA\nWybrano: {len(self.selected_emails)} osób", color=COLOR_PRIMARY, size_hint_y=None, height=dp(50)))
+        ti_s = TextInput(hint_text="Temat wiadomości", size_hint_y=None, height=dp(50), multiline=False)
+        ti_b = TextInput(hint_text="Treść maila...", multiline=True)
         box.add_widget(ti_s); box.add_widget(ti_b)
-        btn = PremiumButton(text="WYSYŁKA (KROK 4)")
-        btn.bind(on_press=lambda x: [p.dismiss(), self.special_send_step_4_progress(file_path, self.selected_emails, ti_s.text, ti_b.text)] if ti_s.text and ti_b.text else self.msg("!", "Wpisz temat i tresc"))
-        box.add_widget(btn); p = Popup(title="Wiadomosc", content=box, size_hint=(0.95,0.85)); p.open()
+        btn = PremiumButton(text="WYSYŁKA I ZAPIS KOPII (KROK 4)")
+        btn.bind(on_press=lambda x: [p.dismiss(), self.special_send_step_4_progress(file_path, self.selected_emails, ti_s.text, ti_b.text)] if ti_s.text and ti_b.text else self.msg("!", "Wpisz temat i treść!"))
+        box.add_widget(btn); p = Popup(title="Treść wiadomości", content=box, size_hint=(0.95,0.85)); p.open()
 
     def special_send_step_4_progress(self, file_path, target_list, subject, body):
         box = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(15))
-        lbl = Label(text="Inicjalizacja..."); pb = ProgressBar(max=len(target_list), value=0, size_hint_y=None, height=dp(30))
+        lbl = Label(text="Inicjalizacja procesów..."); pb = ProgressBar(max=len(target_list), value=0, size_hint_y=None, height=dp(30))
         box.add_widget(lbl); box.add_widget(pb)
         btn_c = Button(text="ZAMKNIJ", size_hint_y=None, height=dp(50), disabled=True)
-        p = Popup(title="KROK 4: STATUS", content=box, size_hint=(0.85, 0.45), auto_dismiss=False); btn_c.bind(on_press=p.dismiss); box.add_widget(btn_c); p.open()
+        p = Popup(title="KROK 4: WYSYŁKA I KOPIOWANIE", content=box, size_hint=(0.85, 0.45), auto_dismiss=False); btn_c.bind(on_press=p.dismiss); box.add_widget(btn_c); p.open()
 
         def run():
             p_conf = Path(self.user_data_dir) / "smtp.json"
             if not p_conf.exists(): Clock.schedule_once(lambda dt: self.msg("!", "Brak SMTP")); p.dismiss(); return
             cfg = json.load(open(p_conf)); ok, err = 0, 0
+            exp_dir = Path("/storage/emulated/0/Documents/FutureExport") if platform=="android" else Path("./exports")
+            exp_dir.mkdir(parents=True, exist_ok=True)
+
             try:
                 srv = smtplib.SMTP("smtp.gmail.com", 587, timeout=15); srv.starttls(); srv.login(cfg['u'], cfg['p'])
                 for i, email in enumerate(target_list):
                     try:
-                        Clock.schedule_once(lambda dt: setattr(lbl, 'text', f"Wysylka do: {email}"))
-                        msg = EmailMessage(); msg["Subject"] = subject; msg["From"], msg["To"] = cfg['u'], email; msg.set_content(body)
+                        Clock.schedule_once(lambda dt: setattr(lbl, 'text', f"Przetwarzanie: {email}"))
+                        info = self.conn.execute("SELECT name, surname FROM contacts WHERE email=?", (email,)).fetchone()
+                        base_name = f"{info[0].title()}_{info[1].title()}" if info else email.replace("@", "_")
+                        
+                        # Zapis kopii pliku uzytkownika
                         if os.path.exists(file_path):
+                            shutil.copy(file_path, exp_dir / f"Spec [{base_name}] {os.path.basename(file_path)}")
+
+                        # Wysylka maila
+                        msg = EmailMessage(); msg["Subject"] = subject; msg["From"], msg["To"] = cfg['u'], email; msg.set_content(body)
+                        with open(file_path, "rb") as f:
                             ct, _ = mimetypes.guess_type(file_path); mn, sb = (ct or 'application/octet-stream').split('/', 1)
-                            with open(file_path, "rb") as f: msg.add_attachment(f.read(), maintype=mn, subtype=sb, filename=os.path.basename(file_path))
+                            msg.add_attachment(f.read(), maintype=mn, subtype=sb, filename=os.path.basename(file_path))
+                        
                         srv.send_message(msg); ok += 1
                     except: err += 1
                     Clock.schedule_once(lambda dt, idx=i+1: setattr(pb, 'value', idx))
                 srv.quit()
-                Clock.schedule_once(lambda dt: [setattr(lbl, 'text', f"ZAKONCZONO\nSukces: {ok} | Blad: {err}"), setattr(btn_c, 'disabled', False)])
+                Clock.schedule_once(lambda dt: [setattr(lbl, 'text', f"ZAKOŃCZONO\nSukces (Mail+Kopia): {ok} | Błąd: {err}"), setattr(btn_c, 'disabled', False)])
                 self.conn.execute("INSERT INTO reports (date, ok, fail, skip, auto) VALUES (?,?,?,?,?)", (f"{datetime.now().strftime('%Y-%m-%d %H:%M')} (SPEC)", ok, err, 0, 0)); self.conn.commit()
-            except Exception as e: Clock.schedule_once(lambda dt: [setattr(lbl, 'text', f"Blad: {str(e)}"), setattr(btn_c, 'disabled', False)])
+            except Exception as e: Clock.schedule_once(lambda dt: [setattr(lbl, 'text', f"Błąd: {str(e)}"), setattr(btn_c, 'disabled', False)])
         threading.Thread(target=run, daemon=True).start()
 
-    # --- GLOWNE FUNKCJE ---
+    # --- GLÓWNE METODY ---
 
     def test_smtp(self, _):
         p = Path(self.user_data_dir) / "smtp.json"
-        if not p.exists(): self.msg("!", "Brak danych SMTP"); return
+        if not p.exists(): self.msg("!", "Zapisz najpierw SMTP"); return
         cfg = json.load(open(p))
         def task():
             try:
                 srv = smtplib.SMTP("smtp.gmail.com", 587, timeout=10); srv.starttls(); srv.login(cfg['u'], cfg['p']); srv.quit()
-                Clock.schedule_once(lambda dt: self.msg("OK", "Polaczenie ze stopki Gmail poprawne"))
-            except Exception as e: Clock.schedule_once(lambda dt: self.msg("Blad", str(e)))
+                Clock.schedule_once(lambda dt: self.msg("OK", "Połączenie z Gmail poprawne!"))
+            except Exception as e: Clock.schedule_once(lambda dt: self.msg("Błąd", str(e)))
         threading.Thread(target=task, daemon=True).start()
 
     def setup_ui(self):
-        # HOME
         l = BoxLayout(orientation="vertical", padding=dp(30), spacing=dp(15))
         l.add_widget(Label(text="FUTURE 22.4 ULTIMATE", font_size='26sp', bold=True, color=COLOR_PRIMARY))
         btn = lambda t, c: l.add_widget(PremiumButton(text=t, on_press=c))
-        btn("WCZYTAJ ARKUSZ PLAC", lambda x: self.open_picker("data"))
-        btn("PODGLAD I EKSPORT", lambda x: [self.refresh_table(), setattr(self.sm, 'current', 'table')] if self.full_data else self.msg("!", "Brak danych"))
+        btn("WCZYTAJ ARKUSZ PŁAC", lambda x: self.open_picker("data"))
+        btn("PODGLĄD I EKSPORT", lambda x: [self.refresh_table(), setattr(self.sm, 'current', 'table')] if self.full_data else self.msg("!", "Brak danych"))
         btn("CENTRUM MAILINGOWE", lambda x: setattr(self.sm, 'current', 'email'))
-        btn("RAPORTY WYSYLEK", lambda x: [self.refresh_reports(), setattr(self.sm, 'current', 'report')])
+        btn("RAPORTY WYSYŁEK", lambda x: [self.refresh_reports(), setattr(self.sm, 'current', 'report')])
         btn("USTAWIENIA SMTP", lambda x: setattr(self.sm, 'current', 'smtp'))
         self.screens["home"].add_widget(l)
-        
         self.setup_table_ui(); self.setup_email_ui(); self.setup_smtp_ui(); self.setup_tmpl_ui(); self.setup_contacts_ui(); self.setup_report_ui()
 
     def setup_email_ui(self):
@@ -229,7 +242,7 @@ class FutureApp(App):
         btn("ZARZĄDZAJ BAZĄ", lambda x: [self.refresh_contacts_list(), setattr(self.sm, 'current', 'contacts')])
         btn("EDYTUJ TREŚĆ MAILA", lambda x: setattr(self.sm, 'current', 'tmpl'))
         btn("DODAJ ZAŁĄCZNIK GLOBALNY", lambda x: self.open_picker("attachment"))
-        btn("WYŚLIJ ZAŁĄCZNIK (SPECJALNE)", self.start_special_send_flow)
+        btn("WYŚLIJ PLIK", self.start_special_send_flow)
         btn("START MASOWA WYSYŁKA", self.start_mass_mailing)
         btn("POWRÓT", lambda x: setattr(self.sm, 'current', 'home'))
         self.screens["email"].add_widget(l); self.update_stats()
@@ -239,9 +252,13 @@ class FutureApp(App):
         from jnius import autoclass; from android import activity
         PA = autoclass("org.kivy.android.PythonActivity"); Intent = autoclass("android.content.Intent")
         intent = Intent(Intent.ACTION_GET_CONTENT); intent.setType("*/*")
+        
         def cb(req, res, dt):
-            if not dt: return
-            activity.unbind(on_activity_result=cb); uri = dt.getData()
+            activity.unbind(on_activity_result=cb)
+            if res != -1 or not dt: # Obsluga "Wroc" - jesli res nie jest OK
+                return 
+            
+            uri = dt.getData()
             cur = PA.mActivity.getContentResolver().query(uri, None, None, None, None); d_name = "plik.xlsx"
             if cur and cur.moveToFirst():
                 idx = cur.getColumnIndex("_display_name")
@@ -263,16 +280,14 @@ class FutureApp(App):
 
     def start_mass_mailing(self, _):
         if not self.full_data: self.msg("!", "Wczytaj arkusz plac!"); return
-        self.stats = {"ok": 0, "fail": 0, "skip": 0, "auto": 0}; self.queue = list(self.full_data[1:])
-        self.total_q = len(self.queue); self.pb.value = 0; Clock.schedule_once(lambda dt: self.process_mailing_queue())
+        self.stats = {"ok": 0, "fail": 0, "skip": 0, "auto": 0}; self.queue = list(self.full_data[1:]); self.total_q = len(self.queue); self.pb.value = 0; Clock.schedule_once(lambda dt: self.process_mailing_queue())
 
     def process_mailing_queue(self, *args):
-        done = self.total_q - len(self.queue)
-        self.pb.value = int((done/self.total_q)*100) if self.total_q > 0 else 100
-        self.pb_label.text = f"Postep: {self.pb.value}% ({done}/{self.total_q})"
+        done = self.total_q - len(self.queue); self.pb.value = int((done/self.total_q)*100) if self.total_q > 0 else 100
+        self.pb_label.text = f"Postęp: {self.pb.value}% ({done}/{self.total_q})"
         if not self.queue:
             self.conn.execute("INSERT INTO reports (date, ok, fail, skip, auto) VALUES (?,?,?,?,?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), self.stats['ok'], self.stats['fail'], self.stats['skip'], self.stats['auto'])); self.conn.commit()
-            self.msg("Raport", f"Wyslano: {self.stats['ok']}, Bledy: {self.stats['fail']}"); return
+            self.msg("Koniec", "Zakończono wysyłkę masową."); return
         row = self.queue.pop(0)
         try:
             n, s = str(row[self.idx_name]).strip(), str(row[self.idx_surname]).strip(); p = str(row[self.idx_pesel]).strip() if self.idx_pesel != -1 else ""
@@ -285,13 +300,12 @@ class FutureApp(App):
         else: self.stats["skip"] += 1; Clock.schedule_once(lambda dt: self.process_mailing_queue())
 
     def ask_before_send(self, row, email, n, s, p_file):
-        box = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
-        box.add_widget(Label(text=f"POTWIERDŹ:\n{n} {s}\n{email}")); btns = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(10))
+        box = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10)); box.add_widget(Label(text=f"WYŚLIJ DO:\n{n} {s}\n{email}")); btns = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(10))
         def dec(v):
             pp.dismiss()
             if v: self.send_email_engine(row, email)
             else: self.stats["skip"] += 1; Clock.schedule_once(lambda dt: self.process_mailing_queue())
-        btns.add_widget(Button(text="WYSLIJ", on_press=lambda x: dec(True), background_color=(0,0.7,0,1))); btns.add_widget(Button(text="POMIN", on_press=lambda x: dec(False), background_color=(0.7,0,0,1)))
+        btns.add_widget(Button(text="WYŚLIJ", on_press=lambda x: dec(True), background_color=(0,0.7,0,1))); btns.add_widget(Button(text="POMIŃ", on_press=lambda x: dec(False), background_color=(0.7,0,0,1)))
         box.add_widget(btns); pp = Popup(title="Weryfikacja", content=box, size_hint=(0.9, 0.45)); pp.open()
 
     def send_email_engine(self, row_data, target, fast_mode=False):
@@ -302,70 +316,41 @@ class FutureApp(App):
             try:
                 srv = smtplib.SMTP("smtp.gmail.com", 587, timeout=15); srv.starttls(); srv.login(cfg['u'], cfg['p'])
                 msg = EmailMessage(); dat = datetime.now().strftime("%d.%m.%Y"); ts = self.conn.execute("SELECT val FROM settings WHERE key='t_sub'").fetchone(); tb = self.conn.execute("SELECT val FROM settings WHERE key='t_body'").fetchone()
-                name = str(row_data[self.idx_name]) if self.idx_name < len(row_data) else "Klient"
-                msg["Subject"] = (ts[0] if ts else "Wiadomosc").replace("{Imię}", name); msg["From"], msg["To"] = cfg['u'], target; msg.set_content((tb[0] if tb else "Czesc").replace("{Imię}", name).replace("{Data}", dat))
+                # Nazwisko i Imie dla nazwy pliku i tresci
+                name = str(row_data[self.idx_name]).title(); surname = str(row_data[self.idx_surname]).title()
+                msg["Subject"] = (ts[0] if ts else "Wiadomość").replace("{Imię}", name); msg["From"], msg["To"] = cfg['u'], target; msg.set_content((tb[0] if tb else "Cześć").replace("{Imię}", name).replace("{Data}", dat))
                 if not fast_mode and self.full_data and Workbook:
                     tmp = Path(self.user_data_dir) / "r_tmp.xlsx"; wb = Workbook(); ws = wb.active; ws.append([self.full_data[0][k] for k in self.export_indices]); ws.append([row_data[k] for k in self.export_indices]); self.style_xlsx(ws); wb.save(tmp)
-                    with open(tmp, "rb") as f: msg.add_attachment(f.read(), maintype="application", subtype="xlsx", filename=f"Raport_{name}.xlsx")
-                for path in self.global_attachments:
-                    if os.path.exists(path):
-                        ct, _ = mimetypes.guess_type(path); mn, sb = (ct or 'application/octet-stream').split('/', 1)
-                        with open(path, "rb") as f: msg.add_attachment(f.read(), maintype=mn, subtype=sb, filename=os.path.basename(path))
+                    with open(tmp, "rb") as f: msg.add_attachment(f.read(), maintype="application", subtype="xlsx", filename=f"Raport_{name}_{surname}.xlsx")
+                for p in self.global_attachments:
+                    if os.path.exists(p):
+                        ct, _ = mimetypes.guess_type(p); mn, sb = (ct or 'application/octet-stream').split('/', 1)
+                        with open(p, "rb") as f: msg.add_attachment(f.read(), maintype=mn, subtype=sb, filename=os.path.basename(p))
                 srv.send_message(msg); srv.quit(); Clock.schedule_once(lambda d: [self.update_stat("ok"), self.process_mailing_queue()])
             except: Clock.schedule_once(lambda d: [self.update_stat("fail"), self.process_mailing_queue()])
         threading.Thread(target=thread_task, daemon=True).start()
-
-    def setup_contacts_ui(self):
-        l = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(5))
-        top = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5))
-        self.ti_csearch = TextInput(hint_text="Szukaj...", multiline=False); self.ti_csearch.bind(text=self.refresh_contacts_list)
-        top.add_widget(self.ti_csearch); top.add_widget(Button(text="+", size_hint_x=0.15, on_press=lambda x: self.form_contact())); top.add_widget(Button(text="Wroc", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'email')))
-        self.c_list = GridLayout(cols=1, size_hint_y=None, spacing=dp(10)); self.c_list.bind(minimum_height=self.c_list.setter('height')); sc = ScrollView(); sc.add_widget(self.c_list)
-        btn_clr = Button(text="Wyczysc wybranych", size_hint_y=None, height=dp(50), on_press=lambda x: [setattr(self, 'selected_emails', []), self.refresh_contacts_list()])
-        l.add_widget(top); l.add_widget(sc); l.add_widget(btn_clr); self.screens["contacts"].add_widget(l)
 
     def refresh_contacts_list(self, *args):
         self.c_list.clear_widgets(); sv = self.ti_csearch.text.lower(); rows = self.conn.execute("SELECT name, surname, email, pesel, phone FROM contacts ORDER BY surname ASC").fetchall()
         for n, s, e, p, ph in rows:
             if sv and sv not in f"{n} {s} {e} {p} {ph}".lower(): continue
-            row = BoxLayout(size_hint_y=None, height=dp(110), padding=dp(8))
-            cb = CheckBox(size_hint_x=None, width=dp(50), active=(e in self.selected_emails))
+            row = BoxLayout(size_hint_y=None, height=dp(110), padding=dp(8)); cb = CheckBox(size_hint_x=None, width=dp(50), active=(e in self.selected_emails))
             cb.bind(active=lambda inst, val, m=e: [self.selected_emails.append(m) if val else self.selected_emails.remove(m)])
-            row.add_widget(cb)
-            info = BoxLayout(orientation="vertical")
-            info.add_widget(Label(text=f"{n} {s}".title(), bold=True, halign="left", text_size=(dp(200), None)))
-            info.add_widget(Label(text=f"Email: {e}\nPESEL: {p if p else '-'} | Tel: {ph if ph else '-'}", font_size='12sp', color=(0.7,0.7,0.7,1), halign="left", text_size=(dp(200), None)))
-            row.add_widget(info); acts = BoxLayout(size_hint_x=None, width=dp(90), orientation="vertical", spacing=dp(4))
-            acts.add_widget(Button(text="Edytuj", on_press=lambda x, d=(n,s,e,p,ph): self.form_contact(*d)))
-            acts.add_widget(Button(text="Usun", background_color=(0.7,0,0,1), on_press=lambda x, name=n, sur=s: self.delete_contact(name,sur)))
-            row.add_widget(acts); self.c_list.add_widget(row)
+            row.add_widget(cb); info = BoxLayout(orientation="vertical"); info.add_widget(Label(text=f"{n} {s}".title(), bold=True, halign="left", text_size=(dp(200), None))); info.add_widget(Label(text=f"Email: {e}\nPESEL: {p if p else '-'} | Tel: {ph if ph else '-'}", font_size='12sp', color=(0.7,0.7,0.7,1), halign="left", text_size=(dp(200), None))); row.add_widget(info); acts = BoxLayout(size_hint_x=None, width=dp(90), orientation="vertical", spacing=dp(4))
+            acts.add_widget(Button(text="Edytuj", on_press=lambda x, d=(n,s,e,p,ph): self.form_contact(*d))); acts.add_widget(Button(text="Usuń", background_color=(0.7,0,0,1), on_press=lambda x, name=n, sur=s: self.delete_contact(name,sur))); row.add_widget(acts); self.c_list.add_widget(row)
 
     def refresh_reports(self):
         self.report_grid.clear_widgets(); rows = self.conn.execute("SELECT date, ok, fail, skip, auto FROM reports ORDER BY id DESC").fetchall()
         for d, ok, fl, sk, au in rows:
             row = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(85), padding=dp(10))
             with row.canvas.before: Color(0.15, 0.2, 0.25, 1); r = Rectangle(pos=row.pos, size=row.size); row.bind(pos=lambda i,v,rect=r: setattr(rect, 'pos', v), size=lambda i,v,rect=r: setattr(rect, 'size', v))
-            row.add_widget(Label(text=f"Sesja: {d}", bold=True, color=COLOR_PRIMARY, halign="left", text_size=(dp(300), None)))
-            row.add_widget(Label(text=f"OK: {ok} (Auto: {au}) | Bledy: {fl} | Pomin: {sk}", font_size='13sp', halign="left", text_size=(dp(300), None)))
-            self.report_grid.add_widget(row)
-
-    def style_xlsx(self, ws):
-        if not load_workbook: return
-        s = Side(style='thin'); c = Alignment(horizontal='center', vertical='center'); h_f = Font(bold=True); z_f = PatternFill(start_color="F7F7F7", end_color="F7F7F7", fill_type="solid")
-        for r_idx, row in enumerate(ws.iter_rows(), start=1):
-            for cell in row:
-                cell.border = Border(top=s, left=s, right=s, bottom=s); cell.alignment = c
-                if r_idx == 1: cell.font = h_f; cell.fill = PatternFill(start_color="DDEBF7", end_color="DDEBF7", fill_type="solid")
-                elif r_idx % 2 == 0: cell.fill = z_f
-        for col in ws.columns:
-            m_l = max(len(str(cell.value or "")) for cell in col)
-            ws.column_dimensions[col[0].column_letter].width = m_l + 5
+            row.add_widget(Label(text=f"Sesja: {d}", bold=True, color=COLOR_PRIMARY, halign="left", text_size=(dp(300), None))); row.add_widget(Label(text=f"OK: {ok} (Auto: {au}) | Błąd: {fl}", font_size='13sp', halign="left", text_size=(dp(300), None))); self.report_grid.add_widget(row)
 
     # --- POZOSTALE UI ---
     def setup_table_ui(self):
         root = BoxLayout(orientation="vertical"); menu = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5), padding=dp(5))
         self.ti_search = TextInput(hint_text="Szukaj...", multiline=False); self.ti_search.bind(text=self.filter_table); menu.add_widget(self.ti_search)
-        menu.add_widget(Button(text="Opcje", size_hint_x=0.2, on_press=self.popup_columns)); menu.add_widget(Button(text="Powrot", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
+        menu.add_widget(Button(text="Opcje", size_hint_x=0.2, on_press=self.popup_columns)); menu.add_widget(Button(text="Powrót", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
         hs = ScrollView(size_hint_y=None, height=dp(55), do_scroll_y=False); self.table_header_layout = GridLayout(rows=1, size_hint=(None, None), height=dp(55)); hs.add_widget(self.table_header_layout)
         ds = ScrollView(do_scroll_x=True, do_scroll_y=True); self.table_content_layout = GridLayout(size_hint=(None, None))
         self.table_content_layout.bind(minimum_height=self.table_content_layout.setter('height'), minimum_width=self.table_content_layout.setter('width')); ds.add_widget(self.table_content_layout); ds.bind(scroll_x=lambda inst, val: setattr(hs, 'scroll_x', val))
@@ -387,22 +372,30 @@ class FutureApp(App):
             bt = Button(text="Eksport", size=(w,h), size_hint=(None,None)); bt.bind(on_press=lambda x, r=row: self.export_xlsx(r)); self.table_content_layout.add_widget(bt)
 
     def setup_smtp_ui(self):
-        l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10)); self.ti_su = TextInput(hint_text="Gmail", multiline=False); self.ti_sp = TextInput(hint_text="Haslo", password=True)
+        l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10)); self.ti_su = TextInput(hint_text="Gmail", multiline=False); self.ti_sp = TextInput(hint_text="Hasło", password=True)
         p = Path(self.user_data_dir) / "smtp.json"
         if p.exists(): d = json.load(open(p)); self.ti_su.text, self.ti_sp.text = d.get('u',''), d.get('p','')
         def sv(_): [json.dump({'u':self.ti_su.text, 'p':self.ti_sp.text}, open(p, "w")), self.msg("OK", "Zapisano")]
-        l.add_widget(Label(text="USTAWIENIA GMAIL", bold=True)); l.add_widget(self.ti_su); l.add_widget(self.ti_sp); l.add_widget(PremiumButton(text="ZAPISZ", on_press=sv)); l.add_widget(PremiumButton(text="TESTUJ", on_press=self.test_smtp)); l.add_widget(PremiumButton(text="POWROT", on_press=lambda x: setattr(self.sm, 'current', 'home'), background_color=(0.4,0.4,0.4,1))); self.screens["smtp"].add_widget(l)
+        l.add_widget(Label(text="USTAWIENIA GMAIL", bold=True)); l.add_widget(self.ti_su); l.add_widget(self.ti_sp); l.add_widget(PremiumButton(text="ZAPISZ", on_press=sv)); l.add_widget(PremiumButton(text="TESTUJ", on_press=self.test_smtp)); l.add_widget(PremiumButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'home'), background_color=(0.4, 0.4, 0.4, 1))); self.screens["smtp"].add_widget(l)
 
     def setup_tmpl_ui(self):
-        l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10)); self.ti_ts = TextInput(hint_text="Temat {Imię}", size_hint_y=None, height=dp(45)); self.ti_tb = TextInput(hint_text="Tresc...", multiline=True)
+        l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10)); self.ti_ts = TextInput(hint_text="Temat {Imię}", size_hint_y=None, height=dp(45)); self.ti_tb = TextInput(hint_text="Treść...", multiline=True)
         ts = self.conn.execute("SELECT val FROM settings WHERE key='t_sub'").fetchone(); tb = self.conn.execute("SELECT val FROM settings WHERE key='t_body'").fetchone()
         if ts: self.ti_ts.text = ts[0]
         if tb: self.ti_tb.text = tb[0]
         def sv(_): [self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_sub', self.ti_ts.text)), self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_body', self.ti_tb.text)), self.conn.commit(), self.msg("OK", "Zapisano")]
-        l.add_widget(Label(text="SZABLON MAILA", bold=True)); l.add_widget(self.ti_ts); l.add_widget(self.ti_tb); l.add_widget(PremiumButton(text="ZAPISZ", on_press=sv)); l.add_widget(PremiumButton(text="POWROT", on_press=lambda x: setattr(self.sm, 'current', 'email'))); self.screens["tmpl"].add_widget(l)
+        l.add_widget(Label(text="SZABLON MAILA", bold=True)); l.add_widget(self.ti_ts); l.add_widget(self.ti_tb); l.add_widget(PremiumButton(text="ZAPISZ", on_press=sv)); l.add_widget(PremiumButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'email'))); self.screens["tmpl"].add_widget(l)
 
     def setup_report_ui(self):
-        l = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)); self.report_grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(12)); self.report_grid.bind(minimum_height=self.report_grid.setter('height')); sc = ScrollView(); sc.add_widget(self.report_grid); l.add_widget(Label(text="HISTORIA WYSYLEK", bold=True, size_hint_y=None, height=dp(40))); l.add_widget(sc); l.add_widget(PremiumButton(text="POWROT", on_press=lambda x: setattr(self.sm, 'current', 'home'))); self.screens["report"].add_widget(l)
+        l = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)); self.report_grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(12)); self.report_grid.bind(minimum_height=self.report_grid.setter('height')); sc = ScrollView(); sc.add_widget(self.report_grid); l.add_widget(Label(text="HISTORIA WYSYŁEK", bold=True, size_hint_y=None, height=dp(40))); l.add_widget(sc); l.add_widget(PremiumButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'home'))); self.screens["report"].add_widget(l)
+
+    def setup_contacts_ui(self):
+        l = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(5)); top = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5))
+        self.ti_csearch = TextInput(hint_text="Szukaj...", multiline=False); self.ti_csearch.bind(text=self.refresh_contacts_list)
+        top.add_widget(self.ti_csearch); top.add_widget(Button(text="+", size_hint_x=0.15, on_press=lambda x: self.form_contact())); top.add_widget(Button(text="Wróć", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'email')))
+        self.c_list = GridLayout(cols=1, size_hint_y=None, spacing=dp(10)); self.c_list.bind(minimum_height=self.c_list.setter('height')); sc = ScrollView(); sc.add_widget(self.c_list)
+        btn_clr = Button(text="Wyczyść zaznaczonych", size_hint_y=None, height=dp(50), on_press=lambda x: [setattr(self, 'selected_emails', []), self.refresh_contacts_list()])
+        l.add_widget(top); l.add_widget(sc); l.add_widget(btn_clr); self.screens["contacts"].add_widget(l)
 
     def process_excel(self, path):
         try:
@@ -421,7 +414,7 @@ class FutureApp(App):
                 if "naz" in v: self.idx_surname = i
                 if "pesel" in v: self.idx_pesel = i
             self.msg("OK", "Wczytano tabele")
-        except Exception as e: self.msg("Blad", str(e))
+        except Exception as e: self.msg("Błąd", str(e))
 
     def process_book(self, path):
         try:
@@ -437,28 +430,41 @@ class FutureApp(App):
                     pes_v = str(r[iP]) if (iP != -1 and len(r) > iP) else ""
                     self.conn.execute("INSERT OR REPLACE INTO contacts (name, surname, email, pesel, phone) VALUES (?,?,?,?,?)", (r[iN].lower(), r[iS].lower(), str(r[iE]).strip(), pes_v, ""))
             self.conn.commit(); self.update_stats(); self.msg("OK", "Baza zaktualizowana")
-        except: self.msg("Blad", "Blad odczytu bazy")
+        except: self.msg("Błąd", "Błąd odczytu bazy")
 
     def popup_columns(self, _):
         if not self.full_data: return
         box = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(5)); gr = GridLayout(cols=1, size_hint_y=None, spacing=dp(8)); gr.bind(minimum_height=gr.setter('height')); checks = []
         for i, h in enumerate(self.full_data[0]):
-            r = BoxLayout(size_hint_y=None, height=dp(50)); cb = CheckBox(active=(i in self.export_indices), size_hint_x=None, width=dp(50)); checks.append((i,cb)); r.add_widget(cb); r.add_widget(Label(text=str(h))); gr.add_widget(r)
-        sc = ScrollView(); sc.add_widget(gr); box.add_widget(sc); box.add_widget(PremiumButton(text="OK", on_press=lambda x: [setattr(self, 'export_indices', [idx for idx, c in checks if c.active]), p.dismiss(), self.refresh_table()])); p = Popup(title="Widocznosc", content=box, size_hint=(0.9, 0.9)); p.open()
+            r = BoxLayout(size_hint_y=None, height=dp(50)); cb = CheckBox(active=(i in self.export_indices), size_hint_x=None, width=dp(50)); checks.append((i, cb)); r.add_widget(cb); r.add_widget(Label(text=str(h))); gr.add_widget(r)
+        sc = ScrollView(); sc.add_widget(gr); box.add_widget(sc); box.add_widget(PremiumButton(text="OK", on_press=lambda x: [setattr(self, 'export_indices', [idx for idx, c in checks if c.active]), p.dismiss(), self.refresh_table()])); p = Popup(title="Widoczność kolumn", content=box, size_hint=(0.9, 0.9)); p.open()
 
     def export_xlsx(self, r):
         p = Path("/storage/emulated/0/Documents/FutureExport") if platform=="android" else Path("./exports"); p.mkdir(parents=True, exist_ok=True)
-        wb = Workbook(); ws = wb.active; ws.append([self.full_data[0][k] for k in self.export_indices]); ws.append([r[k] for k in self.export_indices]); self.style_xlsx(ws); wb.save(p/f"Raport_{r[self.idx_name]}.xlsx"); self.msg("OK", "Zapisano")
+        n = str(r[self.idx_name]).title(); s = str(r[self.idx_surname]).title()
+        wb = Workbook(); ws = wb.active; ws.append([self.full_data[0][k] for k in self.export_indices]); ws.append([r[k] for k in self.export_indices]); self.style_xlsx(ws); wb.save(p/f"Raport_{n}_{s}.xlsx"); self.msg("OK", f"Zapisano: {n} {s}")
+
+    def style_xlsx(self, ws):
+        if not load_workbook: return
+        s = Side(style='thin'); c = Alignment(horizontal='center', vertical='center'); h_f = Font(bold=True); z_f = PatternFill(start_color="F7F7F7", end_color="F7F7F7", fill_type="solid")
+        for r_idx, row in enumerate(ws.iter_rows(), start=1):
+            for cell in row:
+                cell.border = Border(top=s, left=s, right=s, bottom=s); cell.alignment = c
+                if r_idx == 1: cell.font = h_f; cell.fill = PatternFill(start_color="DDEBF7", end_color="DDEBF7", fill_type="solid")
+                elif r_idx % 2 == 0: cell.fill = z_f
+        for col in ws.columns:
+            m_l = max(len(str(cell.value or "")) for cell in col)
+            ws.column_dimensions[col[0].column_letter].width = m_l + 5
 
     def form_contact(self, n="", s="", e="", pes="", ph=""):
-        b = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)); fields = [TextInput(text=n, hint_text="Imie"), TextInput(text=s, hint_text="Nazwisko"), TextInput(text=e, hint_text="Email"), TextInput(text=pes, hint_text="PESEL"), TextInput(text=ph, hint_text="Tel")]
+        b = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)); fields = [TextInput(text=n, hint_text="Imię"), TextInput(text=s, hint_text="Nazwisko"), TextInput(text=e, hint_text="Email"), TextInput(text=pes, hint_text="PESEL"), TextInput(text=ph, hint_text="Tel")]
         for f in fields: b.add_widget(f)
-        def save(_): [self.conn.execute("INSERT OR REPLACE INTO contacts VALUES (?,?,?,?,?)", [f.text.strip().lower() if i<2 else f.text.strip() for i,f in enumerate(fields)]), self.conn.commit(), p.dismiss(), self.refresh_contacts_list(), self.update_stats()]
+        def save(_): [self.conn.execute("INSERT OR REPLACE INTO contacts VALUES (?,?,?,?,?)", [f.text.strip().lower() if i < 2 else f.text.strip() for i, f in enumerate(fields)]), self.conn.commit(), p.dismiss(), self.refresh_contacts_list(), self.update_stats()]
         b.add_widget(PremiumButton(text="ZAPISZ", on_press=save)); p = Popup(title="Kontakt", content=b, size_hint=(0.9, 0.85)); p.open()
 
     def delete_contact(self, n, s):
         def pr(_): [self.conn.execute("DELETE FROM contacts WHERE name=? AND surname=?", (n, s)), self.conn.commit(), px.dismiss(), self.refresh_contacts_list(), self.update_stats()]
-        px = Popup(title="Usun?", content=Button(text="USUN", on_press=pr, background_color=(1,0,0,1)), size_hint=(0.7,0.3)); px.open()
+        px = Popup(title="Usuń?", content=Button(text="USUŃ", on_press=pr, background_color=(1, 0, 0, 1)), size_hint=(0.7, 0.3)); px.open()
 
     def filter_table(self, ins, val):
         v = val.lower(); self.filtered_data = [self.full_data[0]] + [r for r in self.full_data[1:] if any(v in str(c).lower() for c in r)]; self.refresh_table()
@@ -467,7 +473,7 @@ class FutureApp(App):
     def update_stats(self, *a):
         try:
             c = self.conn.execute("SELECT count(*) FROM contacts").fetchone()[0]
-            self.lbl_stats.text = f"Baza: {c} | Zalaczniki: {len(self.global_attachments)}"
+            self.lbl_stats.text = f"Baza: {c} | Załączniki: {len(self.global_attachments)}"
         except: pass
 
     def msg(self, tit, txt):
