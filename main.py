@@ -26,7 +26,7 @@ from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.progressbar import ProgressBar
 from kivy.graphics import Color, Rectangle
 
-# Obsługa Excel (openpyxl + xlrd)
+# Obsługa Excel
 try:
     from openpyxl import load_workbook, Workbook
     from openpyxl.styles import Border, Side, Font, Alignment, PatternFill
@@ -38,7 +38,6 @@ try:
 except ImportError:
     xlrd = None
 
-# Paleta kolorów
 COLOR_PRIMARY = (0.1, 0.5, 0.9, 1)
 COLOR_BG = (0.08, 0.1, 0.15, 1)
 COLOR_HEADER = (0.9, 0.9, 0.95, 1)
@@ -83,6 +82,7 @@ class FutureApp(App):
         Window.clearcolor = COLOR_BG
         self.full_data = []; self.filtered_data = []; self.export_indices = []
         self.global_attachments = []; self.selected_emails = []; self.queue = []
+        self.session_details = []
         self.stats = {"ok": 0, "fail": 0, "skip": 0, "auto": 0}
         self.idx_name, self.idx_surname, self.idx_pesel = 0, 1, -1
         self.auto_send_mode = False
@@ -104,7 +104,10 @@ class FutureApp(App):
         self.conn = sqlite3.connect(str(db_p), check_same_thread=False)
         self.conn.execute("CREATE TABLE IF NOT EXISTS contacts (name TEXT, surname TEXT, email TEXT, pesel TEXT, phone TEXT, PRIMARY KEY(name, surname))")
         self.conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, val TEXT)")
-        self.conn.execute("CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, ok INTEGER, fail INTEGER, skip INTEGER, auto INTEGER)")
+        self.conn.execute("CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, ok INTEGER, fail INTEGER, skip INTEGER, auto INTEGER, details TEXT)")
+        try:
+            self.conn.execute("ALTER TABLE reports ADD COLUMN details TEXT")
+        except: pass
         self.conn.commit()
 
     def add_screens(self):
@@ -117,7 +120,6 @@ class FutureApp(App):
         self.setup_ui()
         for s in self.screens.values(): self.sm.add_widget(s)
 
-    # --- ANDROID PICKER LOGIC ---
     def open_picker(self, mode):
         if platform != "android": self.msg("!", "Funkcja dostępna tylko na Android"); return
         from jnius import autoclass; from android import activity
@@ -149,7 +151,6 @@ class FutureApp(App):
                 except: self.msg("Błąd", "Wystąpił błąd pliku.")
         activity.bind(on_activity_result=cb); PA.mActivity.startActivityForResult(intent, 1001)
 
-    # --- KREATOR WYSYŁKI SPECJALNEJ (4 KROKI) ---
     def start_special_send_flow(self, _):
         self.open_picker("special_send")
 
@@ -209,12 +210,11 @@ class FutureApp(App):
                     except: err += 1
                     Clock.schedule_once(lambda dt, idx=i+1: setattr(pb, 'value', idx))
                 srv.quit()
-                Clock.schedule_once(lambda dt: [setattr(lbl, 'text', f"KONIEC\\nSukces: {ok} | Błąd: {err}"), setattr(btn_c, 'disabled', False)])
-                self.conn.execute("INSERT INTO reports (date, ok, fail, skip, auto) VALUES (?,?,?,?,?)", (f"{datetime.now().strftime('%Y-%m-%d %H:%M')} (PLIK)", ok, err, 0, 0)); self.conn.commit()
+                Clock.schedule_once(lambda dt: [setattr(lbl, 'text', f"KONIEC\nSukces: {ok} | Błąd: {err}"), setattr(btn_c, 'disabled', False)])
+                self.conn.execute("INSERT INTO reports (date, ok, fail, skip, auto, details) VALUES (?,?,?,?,?,?)", (f"{datetime.now().strftime('%Y-%m-%d %H:%M')} (PLIK)", ok, err, 0, 0, "Wysyłka pliku jednostkowego")); self.conn.commit()
             except Exception as e: Clock.schedule_once(lambda dt: [setattr(lbl, 'text', f"Serwer: {str(e)}"), setattr(btn_c, 'disabled', False)])
         threading.Thread(target=run, daemon=True).start()
 
-    # --- MAIN UI SETUP ---
     def setup_ui(self):
         l = BoxLayout(orientation="vertical", padding=dp(30), spacing=dp(15))
         l.add_widget(Label(text="FUTURE 22.4 ULTIMATE", font_size='26sp', bold=True, color=COLOR_PRIMARY))
@@ -249,54 +249,72 @@ class FutureApp(App):
         btn("POWRÓT", lambda x: setattr(self.sm, 'current', 'home'))
         self.screens["email"].add_widget(l); self.update_stats()
 
-    # --- MASOWA WYSYŁKA (AUTO TRYB) ---
     def start_mass_mailing(self, _):
         if not self.full_data: self.msg("!", "Wczytaj arkusz płac!"); return
-        self.stats = {"ok": 0, "fail": 0, "skip": 0, "auto": 0}; self.queue = list(self.full_data[1:]); self.total_q = len(self.queue)
+        self.stats = {"ok": 0, "fail": 0, "skip": 0, "auto": 0}
+        self.session_details = []
+        self.queue = list(self.full_data[1:]); self.total_q = len(self.queue)
         self.pb.value = 0; Clock.schedule_once(self.process_mailing_queue)
 
     def process_mailing_queue(self, *args):
         done = self.total_q - len(self.queue); self.pb.value = int((done/self.total_q)*100) if self.total_q > 0 else 100
         self.pb_label.text = f"Postęp: {self.pb.value}% ({done}/{self.total_q})"
+        
         if not self.queue:
-            self.conn.execute("INSERT INTO reports (date, ok, fail, skip, auto) VALUES (?,?,?,?,?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), self.stats['ok'], self.stats['fail'], self.stats['skip'], self.stats['auto'])); self.conn.commit()
-            self.msg("Koniec", "Operacja zakończona."); return
+            det = "\n".join(self.session_details)
+            self.conn.execute("INSERT INTO reports (date, ok, fail, skip, auto, details) VALUES (?,?,?,?,?,?)", 
+                             (datetime.now().strftime("%Y-%m-%d %H:%M"), self.stats['ok'], self.stats['fail'], self.stats['skip'], self.stats['auto'], det))
+            self.conn.commit()
+            self.msg("Koniec", f"Operacja zakończona.\nSukces: {self.stats['ok']}\nPominięto: {self.stats['skip']}"); return
+            
         row = self.queue.pop(0)
         try:
             n, s = str(row[self.idx_name]).strip(), str(row[self.idx_surname]).strip(); p = str(row[self.idx_pesel]).strip() if self.idx_pesel != -1 else ""
-        except: self.stats["skip"] += 1; Clock.schedule_once(self.process_mailing_queue); return
+        except: 
+            self.stats["skip"] += 1; self.session_details.append("BŁĄD: Niepoprawny wiersz w Excelu")
+            Clock.schedule_once(self.process_mailing_queue); return
         
+        res = None
         if self.auto_send_mode:
-            res = self.conn.execute("SELECT email FROM contacts WHERE name=? AND surname=?", (n.lower(), s.lower())).fetchone()
-            if res: self.stats["auto"] += 1; self.send_email_engine(row, res[0]); return
-            else: self.stats["skip"] += 1; Clock.schedule_once(self.process_mailing_queue()); return
-
-        if p and len(p) > 5:
+            res = self.conn.execute("SELECT email FROM contacts WHERE name=? AND surname=? COLLATE NOCASE", (n.lower(), s.lower())).fetchone()
+        elif p and len(p) > 5:
             res = self.conn.execute("SELECT email FROM contacts WHERE pesel=?", (p,)).fetchone()
-            if res: self.stats["auto"] += 1; self.send_email_engine(row, res[0]); return
-        
-        res = self.conn.execute("SELECT email FROM contacts WHERE name=? AND surname=?", (n.lower(), s.lower())).fetchone()
-        if res: self.ask_before_send(row, res[0], n, s, p)
-        else: self.stats["skip"] += 1; Clock.schedule_once(self.process_mailing_queue())
+            if not res:
+                res = self.conn.execute("SELECT email FROM contacts WHERE name=? AND surname=? COLLATE NOCASE", (n.lower(), s.lower())).fetchone()
+        else:
+            res = self.conn.execute("SELECT email FROM contacts WHERE name=? AND surname=? COLLATE NOCASE", (n.lower(), s.lower())).fetchone()
+
+        if res:
+            if self.auto_send_mode:
+                self.stats["auto"] += 1; self.send_email_engine(row, res[0])
+            else:
+                self.ask_before_send(row, res[0], n, s, p)
+        else:
+            self.stats["skip"] += 1
+            self.session_details.append(f"POMINIĘTO: {n} {s} (Brak w bazie kontaktów)")
+            Clock.schedule_once(self.process_mailing_queue)
 
     def ask_before_send(self, row, email, n, s, p_file):
         box = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10)); box.add_widget(Label(text=f"POTWIERDŹ:\n{n} {s}\n{email}")); btns = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(10))
         def dec(v):
             px.dismiss()
             if v: self.send_email_engine(row, email)
-            else: self.stats["skip"] += 1; Clock.schedule_once(self.process_mailing_queue())
+            else: 
+                self.stats["skip"] += 1
+                self.session_details.append(f"POMINIĘTO: {n} {s} (Odmowa manualna)")
+                Clock.schedule_once(self.process_mailing_queue)
         btns.add_widget(Button(text="WYŚLIJ", on_press=lambda x: dec(True), background_color=(0,0.7,0,1))); btns.add_widget(Button(text="POMIŃ", on_press=lambda x: dec(False), background_color=(0.7,0,0,1)))
-        box.add_widget(btns); px = Popup(title="Weryfikacja", content=box, size_hint=(0.9, 0.45)); px.open()
+        box.add_widget(btns); px = Popup(title="Weryfikacja", content=box, size_hint=(0.9, 0.45), auto_dismiss=False); px.open()
 
     def send_email_engine(self, row_data, target, fast_mode=False):
         def thread_task():
             cfg_p = Path(self.user_data_dir) / "smtp.json"
             if not cfg_p.exists(): return
             cfg = json.load(open(cfg_p))
+            nx, sx = str(row_data[self.idx_name]).title(), str(row_data[self.idx_surname]).title()
             try:
                 srv = smtplib.SMTP("smtp.gmail.com", 587, timeout=15); srv.starttls(); srv.login(cfg['u'], cfg['p'])
                 msg = EmailMessage(); dat = datetime.now().strftime("%d.%m.%Y"); ts = self.conn.execute("SELECT val FROM settings WHERE key='t_sub'").fetchone(); tb = self.conn.execute("SELECT val FROM settings WHERE key='t_body'").fetchone()
-                nx, sx = str(row_data[self.idx_name]).title(), str(row_data[self.idx_surname]).title()
                 msg["Subject"] = (ts[0] if ts else "Wiadomość").replace("{Imię}", nx); msg["From"], msg["To"] = cfg['u'], target; msg.set_content((tb[0] if tb else "Dzień dobry").replace("{Imię}", nx).replace("{Data}", dat))
                 if not fast_mode and self.full_data:
                     tmp = Path(self.user_data_dir) / "r_tmp.xlsx"; wb = Workbook(); ws = wb.active; ws.append([self.full_data[0][k] for k in self.export_indices]); ws.append([row_data[k] for k in self.export_indices]); self.style_xlsx(ws); wb.save(tmp)
@@ -304,20 +322,42 @@ class FutureApp(App):
                 for path in self.global_attachments:
                     if os.path.exists(path):
                         ct, _ = mimetypes.guess_type(path); mn, sb = (ct or 'application/octet-stream').split('/', 1); msg.add_attachment(open(path, "rb").read(), maintype=mn, subtype=sb, filename=os.path.basename(path))
-                srv.send_message(msg); srv.quit(); Clock.schedule_once(lambda d: [self.update_stat("ok"), self.process_mailing_queue()])
-            except: Clock.schedule_once(lambda d: [self.update_stat("fail"), self.process_mailing_queue()])
+                srv.send_message(msg); srv.quit()
+                self.session_details.append(f"OK: {nx} {sx} ({target})")
+                Clock.schedule_once(lambda d: [self.update_stat("ok"), self.process_mailing_queue()])
+            except Exception as e:
+                self.session_details.append(f"BŁĄD: {nx} {sx} ({str(e)})")
+                Clock.schedule_once(lambda d: [self.update_stat("fail"), self.process_mailing_queue()])
         threading.Thread(target=thread_task, daemon=True).start()
 
-    # --- ADVANCED LOGIC (STYLE, SMTP, REPORTS) ---
     def style_xlsx(self, ws):
         if not Workbook: return
         s, c = Side(style='thin'), Alignment(horizontal='center', vertical='center')
+        
+        # 1. Nakładanie styli na komórki
         for ri, row in enumerate(ws.iter_rows(), 1):
             for cell in row:
                 cell.border = Border(top=s, left=s, right=s, bottom=s); cell.alignment = c
-                if ri == 1: cell.font = Font(bold=True); cell.fill = PatternFill(start_color="DDEBF7", end_color="DDEBF7", fill_type="solid")
-                elif ri % 2 == 0: cell.fill = PatternFill(start_color="F7F7F7", end_color="F7F7F7", fill_type="solid")
-        for col in ws.columns: ws.column_dimensions[col[0].column_letter].width = 18
+                if ri == 1:
+                    cell.font = Font(bold=True)
+                    cell.fill = PatternFill(start_color="DDEBF7", end_color="DDEBF7", fill_type="solid")
+                elif ri % 2 == 0:
+                    cell.fill = PatternFill(start_color="F7F7F7", end_color="F7F7F7", fill_type="solid")
+        
+        # 2. Dynamiczne dopasowanie szerokości kolumn (Auto-fit)
+        for col in ws.columns:
+            max_length = 0
+            column_letter = col[0].column_letter # np. 'A', 'B'
+            for cell in col:
+                try:
+                    if cell.value:
+                        # Oblicz długość tekstu w komórce
+                        l = len(str(cell.value))
+                        if l > max_length: max_length = l
+                except: pass
+            # Ustaw szerokość (max_length + margin dla czytelności)
+            adjusted_width = (max_length + 4)
+            ws.column_dimensions[column_letter].width = adjusted_width
 
     def test_smtp(self, _):
         p = Path(self.user_data_dir) / "smtp.json"; cfg = json.load(open(p)) if p.exists() else None
@@ -338,11 +378,21 @@ class FutureApp(App):
         l = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)); self.report_grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(12)); self.report_grid.bind(minimum_height=self.report_grid.setter('height')); sc = ScrollView(); sc.add_widget(self.report_grid); l.add_widget(Label(text="HISTORIA WYDANYCH RAPORTÓW", bold=True, size_hint_y=None, height=dp(40))); l.add_widget(sc); l.add_widget(PremiumButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'home'))); self.screens["report"].add_widget(l)
 
     def refresh_reports(self, *args):
-        self.report_grid.clear_widgets(); rows = self.conn.execute("SELECT date, ok, fail FROM reports ORDER BY id DESC").fetchall()
-        for d, ok, fl in rows:
-            row = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(85), padding=dp(10)); 
+        self.report_grid.clear_widgets(); rows = self.conn.execute("SELECT date, ok, fail, skip, details FROM reports ORDER BY id DESC").fetchall()
+        for d, ok, fl, sk, dt_text in rows:
+            row = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(110), padding=dp(10)); 
             with row.canvas.before: Color(0.15, 0.2, 0.25, 1); r = Rectangle(pos=row.pos, size=row.size); row.bind(pos=lambda i,v,rect=r: setattr(rect, 'pos', v), size=lambda i,v,rect=r: setattr(rect, 'size', v))
-            row.add_widget(Label(text=f"Sesja: {d}", bold=True, color=COLOR_PRIMARY, halign="left", text_size=(dp(300), None))); row.add_widget(Label(text=f"Sukces: {ok} | Błąd: {fl}", font_size='13sp', halign="left", text_size=(dp(300), None))); self.report_grid.add_widget(row)
+            row.add_widget(Label(text=f"Sesja: {d}", bold=True, color=COLOR_PRIMARY, halign="left", text_size=(dp(300), None)))
+            row.add_widget(Label(text=f"Sukces: {ok} | Błąd: {fl} | Pominięto: {sk}", font_size='13sp', halign="left", text_size=(dp(300), None)))
+            btn = Button(text="Szczegóły", size_hint_y=None, height=dp(35), on_press=lambda x, txt=dt_text: self.show_report_details(txt))
+            row.add_widget(btn); self.report_grid.add_widget(row)
+
+    def show_report_details(self, text):
+        box = BoxLayout(orientation="vertical", padding=dp(10))
+        ti = TextInput(text=text if text else "Brak szczegółów", readonly=True, font_size='11sp')
+        box.add_widget(ti)
+        btn = Button(text="ZAMKNIJ", size_hint_y=None, height=dp(50), on_press=lambda x: p.dismiss())
+        box.add_widget(ti, size_hint_y=0.8); box.add_widget(btn, size_hint_y=0.2); p = Popup(title="Szczegóły sesji", content=box, size_hint=(0.9, 0.8)); p.open()
 
     def setup_table_ui(self):
         root = BoxLayout(orientation="vertical"); menu = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5), padding=dp(5)); self.ti_search = TextInput(hint_text="Szukaj...", multiline=False); self.ti_search.bind(text=self.filter_table); menu.add_widget(self.ti_search); menu.add_widget(Button(text="Opcje", size_hint_x=0.2, on_press=self.popup_columns)); menu.add_widget(Button(text="Wróć", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home'))); hs = ScrollView(size_hint_y=None, height=dp(55), do_scroll_y=False); self.table_header_layout = GridLayout(rows=1, size_hint=(None, None), height=dp(55)); hs.add_widget(self.table_header_layout); ds = ScrollView(do_scroll_x=True, do_scroll_y=True); self.table_content_layout = GridLayout(size_hint=(None, None)); self.table_content_layout.bind(minimum_height=self.table_content_layout.setter('height'), minimum_width=self.table_content_layout.setter('width')); ds.add_widget(self.table_content_layout); ds.bind(scroll_x=lambda inst, val: setattr(hs, 'scroll_x', val)); root.add_widget(menu); root.add_widget(hs); root.add_widget(ds); self.screens["table"].add_widget(root)
@@ -371,9 +421,16 @@ class FutureApp(App):
         self.c_list.clear_widgets(); sv = self.ti_csearch.text.lower(); rows = self.conn.execute("SELECT name, surname, email, pesel, phone FROM contacts ORDER BY surname ASC").fetchall()
         for n, s, e, p, ph in rows:
             if sv and sv not in f"{n} {s} {e} {p} {ph}".lower(): continue
-            row, cb = BoxLayout(size_hint_y=None, height=dp(110), padding=dp(8)), CheckBox(size_hint_x=None, width=dp(50), active=(e in self.selected_emails))
+            row, cb = BoxLayout(size_hint_y=None, height=dp(125), padding=dp(8)), CheckBox(size_hint_x=None, width=dp(50), active=(e in self.selected_emails))
             cb.bind(active=lambda i, v, m=e: [self.selected_emails.append(m) if v else self.selected_emails.remove(m)]); row.add_widget(cb)
-            info = BoxLayout(orientation="vertical"); info.add_widget(Label(text=f"{n} {s}".title(), bold=True, halign="left", text_size=(dp(200), None))); info.add_widget(Label(text=f"Email: {e}\\nPESEL: {p if p else '-'}", font_size='12sp', color=(0.7,0.7,0.7,1), halign="left", text_size=(dp(200), None))); row.add_widget(info); acts = BoxLayout(size_hint_x=None, width=dp(90), orientation="vertical", spacing=dp(4)); acts.add_widget(Button(text="Edytuj", on_press=lambda x, d=(n,s,e,p,ph): self.form_contact(*d))); acts.add_widget(Button(text="Usuń", background_color=(0.7,0.0,0.0,1), on_press=lambda x, name=n, sur=s: self.delete_contact(name,sur))); row.add_widget(acts); self.c_list.add_widget(row)
+            info = BoxLayout(orientation="vertical")
+            info.add_widget(Label(text=f"{n} {s}".title(), bold=True, halign="left", text_size=(dp(200), None)))
+            info.add_widget(Label(text=f"Email: {e}\nPESEL: {p if p else '-'}\nTel: {ph if ph else '-'}", font_size='12sp', color=(0.7,0.7,0.7,1), halign="left", text_size=(dp(200), None)))
+            row.add_widget(info)
+            acts = BoxLayout(size_hint_x=None, width=dp(90), orientation="vertical", spacing=dp(4))
+            acts.add_widget(Button(text="Edytuj", on_press=lambda x, d=(n,s,e,p,ph): self.form_contact(*d)))
+            acts.add_widget(Button(text="Usuń", background_color=(0.7,0.0,0.0,1), on_press=lambda x, name=n, sur=s: self.delete_contact(name,sur)))
+            row.add_widget(acts); self.c_list.add_widget(row)
 
     def process_excel(self, path):
         try:
