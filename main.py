@@ -104,7 +104,7 @@ class FutureApp(App):
         return self.sm
 
     def init_db(self):
-        db_p = Path(self.user_data_dir) / "future_v14.db"
+        db_p = Path(self.user_data_dir) / "future_v15.db"
         self.conn = sqlite3.connect(str(db_p), check_same_thread=False)
         self.conn.execute("CREATE TABLE IF NOT EXISTS contacts (name TEXT, surname TEXT, email TEXT, pesel TEXT, phone TEXT, PRIMARY KEY(name, surname))")
         self.conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, val TEXT)")
@@ -117,7 +117,7 @@ class FutureApp(App):
 
     def setup_ui_all(self):
         l = BoxLayout(orientation="vertical", padding=dp(30), spacing=dp(15))
-        l.add_widget(Label(text="FUTURE ULTIMATE v14", font_size='34sp', bold=True, color=COLOR_PRIMARY))
+        l.add_widget(Label(text="FUTURE ULTIMATE v15", font_size='34sp', bold=True, color=COLOR_PRIMARY))
         btn = lambda t, c: l.add_widget(ModernButton(text=t, on_press=c, height=dp(55), size_hint_y=None))
         btn("WCZYTAJ ARKUSZ PŁAC", lambda x: self.open_picker("data"))
         btn("PODGLĄD I EKSPORT", lambda x: [self.refresh_table(), setattr(self.sm, 'current', 'table')] if self.full_data else self.msg("!", "Wczytaj arkusz!"))
@@ -127,7 +127,7 @@ class FutureApp(App):
         self.sc_ref["home"].add_widget(l)
         self.setup_table_ui(); self.setup_email_ui(); self.setup_smtp_ui(); self.setup_tmpl_ui(); self.setup_contacts_ui(); self.setup_report_ui()
 
-    # --- PEŁNY PODGLĄD TABELI Z FUNKCJAMI ---
+    # --- POPRAWIONY PODGLĄD TABELI ---
 
     def setup_table_ui(self):
         root = BoxLayout(orientation="vertical")
@@ -161,8 +161,8 @@ class FutureApp(App):
         self.table_header_layout.width = self.table_content_layout.width = total_w
 
         # Nagłówki
-        for head in headers: self.table_header_layout.add_widget(ColorSafeLabel(text=str(head), bg_color=COLOR_HEADER, bold=True, size=(w_cell, h), size_hint=(None,None)))
-        self.table_header_layout.add_widget(ColorSafeLabel(text="AKCJE", bg_color=COLOR_HEADER, bold=True, size=(w_act, h), size_hint=(None,None)))
+        for head in headers: self.table_header_layout.add_widget(ColorSafeLabel(text=str(head), bg_color=COLOR_HEADER, bold=True, size=(w_cell, h), size_hint=(None,None), text_color=(0,0,0,1)))
+        self.table_header_layout.add_widget(ColorSafeLabel(text="AKCJE", bg_color=COLOR_HEADER, bold=True, size=(w_act, h), size_hint=(None,None), text_color=(0,0,0,1)))
 
         # Dane
         for r_idx, row in enumerate(self.filtered_data[1:]):
@@ -171,34 +171,51 @@ class FutureApp(App):
                 val = str(row[c_idx]) if c_idx < len(row) and str(row[c_idx]).strip() != "" else "0"
                 self.table_content_layout.add_widget(ColorSafeLabel(text=val, bg_color=row_bg, size=(w_cell, h), size_hint=(None,None)))
             
-            # Przyciski Akcji
             act_box = BoxLayout(size=(w_act, h), size_hint=(None,None), spacing=dp(4), padding=dp(4))
             act_box.add_widget(Button(text="ZAPISZ", on_press=lambda x, r=row: self.export_single_row(r), background_color=(0.2, 0.6, 0.2, 1)))
             act_box.add_widget(Button(text="WYŚLIJ", on_press=lambda x, r=row: self.send_individual_from_table(r), background_color=(0.1, 0.5, 0.9, 1)))
             self.table_content_layout.add_widget(act_box)
 
-    # --- INDYWIDUALNA WYSYŁKA Z TABELI ---
+    # --- POPRAWIONY PROCESOR EXCEL ---
+
+    def process_excel(self, path):
+        try:
+            if str(path).endswith(".xls") and xlrd:
+                wb = xlrd.open_workbook(path); ws = wb.sheet_by_index(0); raw = [[str(ws.cell_value(r,c)).strip() for c in range(ws.ncols)] for r in range(ws.nrows)]
+            else:
+                wb = load_workbook(path, data_only=True); ws = wb.active; raw = [["" if v is None else str(v).strip() for v in r] for r in ws.iter_rows(values_only=True)]
+            h_idx = 0
+            for i, r in enumerate(raw[:15]): 
+                if any(x in " ".join([str(v) for v in r]).lower() for x in ["imię", "imie", "nazwisko"]): h_idx = i; break
+            
+            # KLUCZOWA POPRAWKA:
+            self.full_data = raw[h_idx:]
+            self.filtered_data = self.full_data # To naprawia czarny ekran w tabeli
+            self.export_indices = list(range(len(self.full_data[0])))
+            
+            for i,v in enumerate(self.full_data[0]):
+                v = str(v).lower()
+                if "imi" in v: self.idx_name = i
+                if "naz" in v: self.idx_surname = i
+                if "pesel" in v: self.idx_pesel = i
+            self.msg("OK", "Arkusz wczytany")
+        except: self.msg("BŁĄD", "Plik uszkodzony")
+
+    # --- RESTA SYSTEMU ---
 
     def send_individual_from_table(self, row):
         name, sur = str(row[self.idx_name]).strip(), str(row[self.idx_surname]).strip()
         pes = str(row[self.idx_pesel]).strip() if self.idx_pesel != -1 else ""
-        
-        # Szukaj kontaktu
         res = self.conn.execute("SELECT email FROM contacts WHERE pesel=? AND pesel != ''", (pes,)).fetchone() if pes else None
         if not res: res = self.conn.execute("SELECT email FROM contacts WHERE name=? AND surname=? COLLATE NOCASE", (name.lower(), sur.lower())).fetchone()
-        
-        if not res: return self.msg("Błąd", f"Nie znaleziono adresu dla: {name} {sur}")
-        
+        if not res: return self.msg("Błąd", f"Brak maila dla: {name}")
         def task():
             cfg_p = Path(self.user_data_dir)/"smtp.json"
             if not cfg_p.exists(): return Clock.schedule_once(lambda d: self.msg("!", "Brak SMTP"))
             cfg = json.load(open(cfg_p)); srv = self.connect_smtp(cfg)
-            if self.send_single_email(srv, cfg, row, res[0]):
-                Clock.schedule_once(lambda d: self.msg("OK", f"Wysłano do: {name}"))
+            if self.send_single_email(srv, cfg, row, res[0]): Clock.schedule_once(lambda d: self.msg("OK", f"Wysłano do: {name}"))
             srv.quit()
         threading.Thread(target=task, daemon=True).start()
-
-    # --- CENTRUM MAILINGOWE I IMPORT ---
 
     def setup_email_ui(self):
         l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10))
@@ -225,8 +242,6 @@ class FutureApp(App):
                 if r[iE] and "@" in str(r[iE]): self.conn.execute("INSERT OR REPLACE INTO contacts VALUES (?,?,?,?,?)", (str(r[iN]).lower(), str(r[iS]).lower(), str(r[iE]).strip(), str(r[iP]) if iP!=-1 else "", "")); 
             self.conn.commit(); self.update_stats(); self.msg("OK", "Baza zaktualizowana")
         except: self.msg("Błąd", "Nieudany import")
-
-    # --- LOGIKA WYSYŁKI MASOWEJ (1:1 / BATCHING) ---
 
     def mailing_worker(self):
         cfg_p = Path(self.user_data_dir)/"smtp.json"
@@ -303,8 +318,6 @@ class FutureApp(App):
         try: s = self.connect_smtp({'h':self.ti_h.text,'port':self.ti_pt.text,'u':self.ti_u.text,'p':self.ti_p.text}); s.quit(); self.msg("OK", "Serwer SMTP Działa!")
         except Exception as e: self.msg("BŁĄD", str(e)[:60])
 
-    # --- BRAKUJĄCA WYSYŁKA SPECJALNA ---
-
     def start_special_send_flow(self, _): self.open_picker("special_send")
     def special_send_step_2(self, path):
         self.selected_emails = []; box = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)); ti = ModernInput(hint_text="Szukaj..."); box.add_widget(ti)
@@ -330,8 +343,6 @@ class FutureApp(App):
                 srv.quit(); Clock.schedule_once(lambda d: self.msg("OK", "Wysłano"))
             threading.Thread(target=task, daemon=True).start(); p.dismiss()
         b.add_widget(ModernButton(text="WYŚLIJ PLIK", on_press=run)); p = Popup(title="Wiadomość", content=b, size_hint=(.9, .8)); p.open()
-
-    # --- POZOSTAŁE FUNKCJE SYSTEMOWE ---
 
     def filter_table(self, i, v): self.filtered_data = [self.full_data[0]] + [r for r in self.full_data[1:] if any(v.lower() in str(c).lower() for c in r)]; self.refresh_table()
     def start_mass_mailing(self, _):
@@ -368,22 +379,6 @@ class FutureApp(App):
                     except: pass
                 self.update_stats()
         activity.bind(on_activity_result=cb); PA.mActivity.startActivityForResult(intent, 1001)
-
-    def process_excel(self, path):
-        try:
-            if str(path).endswith(".xls") and xlrd:
-                wb = xlrd.open_workbook(path); ws = wb.sheet_by_index(0); raw = [[str(ws.cell_value(r,c)).strip() for c in range(ws.ncols)] for r in range(ws.nrows)]
-            else:
-                wb = load_workbook(path, data_only=True); ws = wb.active; raw = [["" if v is None else str(v).strip() for v in r] for r in ws.iter_rows(values_only=True)]
-            h_idx = 0; [h_idx := i for i, r in enumerate(raw[:15]) if any(x in " ".join([str(v) for v in r]).lower() for x in ["imię", "imie", "nazwisko"])]
-            self.full_data, self.export_indices = raw[h_idx:], list(range(len(raw[h_idx][0])))
-            for i,v in enumerate(self.full_data[0]):
-                v = str(v).lower()
-                if "imi" in v: self.idx_name = i
-                if "naz" in v: self.idx_surname = i
-                if "pesel" in v: self.idx_pesel = i
-            self.msg("OK", "Arkusz wczytany")
-        except: self.msg("BŁĄD", "Plik uszkodzony")
 
     def setup_tmpl_ui(self):
         l, ti_s, ti_b = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10)), ModernInput(hint_text="Temat {Imię}"), ModernInput(hint_text="Treść...", multiline=True)
