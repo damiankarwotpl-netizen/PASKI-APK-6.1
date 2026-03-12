@@ -9,6 +9,8 @@ package.name = futureultimate
 # (str) Package domain (needed for android/ios packaging)
 package.domain = com.yourcompany
 
+source.dir = .
+
 # (str) Application versioning (method 1)
 version = 20.0
 
