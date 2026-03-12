@@ -11,6 +11,7 @@ from pathlib import Path
 from email.message import EmailMessage
 import io
 import csv
+import urllib.request
 
 from kivy.app import App
 from kivy.metrics import dp
@@ -39,7 +40,6 @@ try:
 except ImportError:
     xlrd = None
 
-# Paleta kolorów
 COLOR_PRIMARY = (0.1, 0.5, 0.9, 1)
 COLOR_BG = (0.05, 0.07, 0.1, 1)
 COLOR_CARD = (0.12, 0.15, 0.2, 1)
@@ -48,18 +48,17 @@ COLOR_ROW_A = (0.08, 0.1, 0.15, 1)
 COLOR_ROW_B = (0.13, 0.16, 0.22, 1)
 COLOR_HEADER = (0.1, 0.2, 0.35, 1)
 
-# --- KOMPONENTY ---
-
 class ModernButton(Button):
     def __init__(self, bg_color=COLOR_PRIMARY, **kwargs):
         super().__init__(**kwargs)
         self.background_normal = ""
-        self.background_color = (0,0,0,0)
+        self.background_color = (0, 0, 0, 0)
         self.color = COLOR_TEXT
-        self.bold, self.radius = True, [dp(12)]
+        self.bold = True
+        self.font_size = '15sp'
         with self.canvas.before:
             Color(*bg_color)
-            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=self.radius)
+            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(12)])
         self.bind(pos=self._update, size=self._update)
     def _update(self, *args):
         self.rect.pos, self.rect.size = self.pos, self.size
@@ -80,11 +79,10 @@ class ColorSafeLabel(Label):
             Color(*bg_color)
             self.rect = Rectangle(size=self.size, pos=self.pos)
         self.bind(size=self._update, pos=self._update)
-    def _update(self, inst, val):
+    def _update(self, *args):
         self.rect.size, self.rect.pos = self.size, self.pos
         self.text_size = (self.width - dp(10), None)
 
-# --- EKRANY ---
 class HomeScreen(Screen): pass
 class TableScreen(Screen): pass
 class EmailScreen(Screen): pass
@@ -92,9 +90,7 @@ class SMTPScreen(Screen): pass
 class TemplateScreen(Screen): pass
 class ContactsScreen(Screen): pass
 class ReportScreen(Screen): pass
-class ClothesScreen(Screen): pass # Nowy ekran
-
-# --- APLIKACJA ---
+class ClothesScreen(Screen): pass
 
 class FutureApp(App):
     def build(self):
@@ -120,37 +116,31 @@ class FutureApp(App):
     def init_db(self):
         db_p = Path(self.user_data_dir) / "future_v20.db"
         self.conn = sqlite3.connect(str(db_p), check_same_thread=False)
-        
-        # contacts table: dodano kolumnę 'company'
         self.conn.execute("CREATE TABLE IF NOT EXISTS contacts (name TEXT, surname TEXT, email TEXT, pesel TEXT, phone TEXT, company TEXT, PRIMARY KEY(name, surname))")
-        try: # Dodanie kolumny company, jeśli jej nie ma
+        try:
             self.conn.execute("ALTER TABLE contacts ADD COLUMN company TEXT")
         except sqlite3.OperationalError:
-            pass # Kolumna już istnieje
-        
+            pass
         self.conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, val TEXT)")
         self.conn.execute("CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, ok INTEGER, fail INTEGER, skip INTEGER, auto INTEGER, original_filename TEXT, details TEXT)")
-        
-        # Nowe tabele dla funkcji "Ciuchy"
         self.conn.execute("CREATE TABLE IF NOT EXISTS clothes_types (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)")
         self.conn.execute("CREATE TABLE IF NOT EXISTS employee_clothes (contact_name TEXT, contact_surname TEXT, cloth_type_id INTEGER, size TEXT, PRIMARY KEY(contact_name, contact_surname, cloth_type_id), FOREIGN KEY(contact_name, contact_surname) REFERENCES contacts(name, surname), FOREIGN KEY(cloth_type_id) REFERENCES clothes_types(id))")
-        self.conn.execute("CREATE TABLE IF NOT EXISTS clothes_issuance_log (id INTEGER PRIMARY KEY AUTOINCREMENT, contact_name TEXT, contact_surname TEXT, company TEXT, issuance_date TEXT, issued_by TEXT, issuance_type TEXT)") # issuance_type: 'person' or 'company'
-
+        self.conn.execute("CREATE TABLE IF NOT EXISTS clothes_issuance_log (id INTEGER PRIMARY KEY AUTOINCREMENT, contact_name TEXT, contact_surname TEXT, company TEXT, issuance_date TEXT, issued_by TEXT, issuance_type TEXT)")
         self.conn.commit()
 
-        # Domyślne typy ubrań (jeśli tabela jest pusta)
         default_clothes = ["Koszulka", "Spodnie", "Bluza", "Kurtka", "Buty", "Czapka"]
         for item in default_clothes:
             try:
                 self.conn.execute("INSERT INTO clothes_types (name) VALUES (?)", (item,))
             except sqlite3.IntegrityError:
-                pass # Typ ubrania już istnieje
+                pass
         self.conn.commit()
 
-
     def add_screens(self):
-        self.sc_ref = {name: Screen(name=name) for name in ["home", "table", "email", "smtp", "tmpl", "contacts", "report", "clothes"]} # Dodano "clothes"
-        self.setup_ui_all(); [self.sm.add_widget(s) for s in self.sc_ref.values()]
+        self.sc_ref = {name: Screen(name=name) for name in ["home", "table", "email", "smtp", "tmpl", "contacts", "report", "clothes"]}
+        self.setup_ui_all()
+        for s in self.sc_ref.values():
+            self.sm.add_widget(s)
 
     def setup_ui_all(self):
         l = BoxLayout(orientation="vertical", padding=dp(30), spacing=dp(15))
@@ -161,20 +151,18 @@ class FutureApp(App):
         btn("CENTRUM MAILINGOWE", lambda x: setattr(self.sm, 'current', 'email'))
         btn("RAPORTY SESJI", lambda x: [self.refresh_reports(), setattr(self.sm, 'current', 'report')])
         btn("USTAWIENIA SMTP", lambda x: setattr(self.sm, 'current', 'smtp'))
-        btn("CIUCHY", lambda x: [self.refresh_employee_list_for_clothes(), setattr(self.sm, 'current', 'clothes')]) # Nowy przycisk
+        btn("CIUCHY", lambda x: [self.refresh_employee_list_for_clothes(), setattr(self.sm, 'current', 'clothes')])
         self.sc_ref["home"].add_widget(l)
         self.setup_table_ui(); self.setup_email_ui(); self.setup_smtp_ui(); self.setup_tmpl_ui(); self.setup_contacts_ui(); self.setup_report_ui()
-        self.setup_clothes_ui() # Ustawienia nowego ekranu
-
-    # --- PODGLĄD TABELI ---
+        self.setup_clothes_ui()
 
     def setup_table_ui(self):
         root = BoxLayout(orientation="vertical")
         menu = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5), padding=dp(5))
         self.ti_tab_search = ModernInput(hint_text="Szukaj w tabeli..."); self.ti_tab_search.bind(text=self.filter_table)
         menu.add_widget(self.ti_tab_search)
-        menu.add_widget(Button(text="KOLUMNY", size_hint_x=0.2, on_press=self.popup_columns))
-        menu.add_widget(Button(text="WRÓĆ", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
+        menu.add_widget(ModernButton(text="KOLUMNY", size_hint_x=0.2, on_press=self.popup_columns))
+        menu.add_widget(ModernButton(text="WRÓĆ", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
         
         hs = ScrollView(size_hint_y=None, height=dp(55), do_scroll_y=False)
         self.table_header_layout = GridLayout(rows=1, size_hint=(None, None), height=dp(55))
@@ -199,7 +187,8 @@ class FutureApp(App):
         self.table_header_layout.cols = self.table_content_layout.cols = len(headers) + 1
         self.table_header_layout.width = self.table_content_layout.width = total_w
 
-        for head in headers: self.table_header_layout.add_widget(ColorSafeLabel(text=str(head), bg_color=COLOR_HEADER, bold=True, size=(w_cell, h), size_hint=(None,None), text_color=(0,0,0,1)))
+        for head in headers:
+            self.table_header_layout.add_widget(ColorSafeLabel(text=str(head), bg_color=COLOR_HEADER, bold=True, size=(w_cell, h), size_hint=(None,None), text_color=(0,0,0,1)))
         self.table_header_layout.add_widget(ColorSafeLabel(text="AKCJE", bg_color=COLOR_HEADER, bold=True, size=(w_act, h), size_hint=(None,None), text_color=(0,0,0,1)))
 
         for r_idx, row in enumerate(self.filtered_data[1:]):
@@ -209,11 +198,9 @@ class FutureApp(App):
                 self.table_content_layout.add_widget(ColorSafeLabel(text=val, bg_color=row_bg, size=(w_cell, h), size_hint=(None,None)))
             
             act_box = BoxLayout(size=(w_act, h), size_hint=(None,None), spacing=dp(4), padding=dp(4))
-            act_box.add_widget(Button(text="ZAPISZ", on_press=lambda x, r=row: self.export_single_row(r), background_color=(0.2, 0.6, 0.2, 1)))
-            act_box.add_widget(Button(text="WYŚLIJ", on_press=lambda x, r=row: self.send_individual_from_table(r), background_color=(0.1, 0.5, 0.9, 1)))
+            act_box.add_widget(ModernButton(text="ZAPISZ", on_press=lambda x, r=row: self.export_single_row(r), height=dp(40), bg_color=(0.2, 0.6, 0.2, 1)))
+            act_box.add_widget(ModernButton(text="WYŚLIJ", on_press=lambda x, r=row: self.send_individual_from_table(r), height=dp(40), bg_color=(0.1, 0.5, 0.9, 1)))
             self.table_content_layout.add_widget(act_box)
-
-    # --- INDYWIDUALNA WYSYŁKA Z TABELI ---
 
     def send_individual_from_table(self, row):
         name, sur = str(row[self.idx_name]).strip(), str(row[self.idx_surname]).strip()
@@ -239,8 +226,6 @@ class FutureApp(App):
             srv.quit()
         threading.Thread(target=task, daemon=True).start()
 
-    # --- CENTRUM MAILINGOWE I IMPORT ---
-
     def setup_email_ui(self):
         l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10))
         ab = BoxLayout(size_hint_y=None, height=dp(45), spacing=dp(10))
@@ -263,21 +248,20 @@ class FutureApp(App):
     def process_book(self, path):
         try:
             wb = load_workbook(path, data_only=True); ws = wb.active; raw = list(ws.iter_rows(values_only=True))
-            h = [str(x).lower() for x in raw[0]]; iN, iS, iE, iP, iC = 0, 1, 2, -1, -1 # Dodano iC dla Company
+            h = [str(x).lower() for x in raw[0]]; iN, iS, iE, iP, iC = 0, 1, 2, -1, -1
             for i,v in enumerate(h):
                 if "imi" in v: iN=i
                 elif "naz" in v: iS=i
                 elif "@" in v or "mail" in v: iE=i
                 elif "pesel" in v: iP=i
-                elif "firma" in v or "company" in v: iC=i # Rozpoznawanie kolumny firma
+                elif "firma" in v or "company" in v: iC=i
             for r in raw[1:]:
                 if len(r) > iE and r[iE] and "@" in str(r[iE]):
-                    company_val = str(r[iC]).strip() if iC != -1 and len(r) > iC else "" # Pobierz wartość firmy
-                    self.conn.execute("INSERT OR REPLACE INTO contacts VALUES (?,?,?,?,?,?)", (str(r[iN]).lower(), str(r[iS]).lower(), str(r[iE]).strip(), str(r[iP]) if iP!=-1 else "", "", company_val)); 
+                    company_val = str(r[iC]).strip() if iC != -1 and len(r) > iC else ""
+                    self.conn.execute("INSERT OR REPLACE INTO contacts VALUES (?,?,?,?,?,?)", (str(r[iN]).lower(), str(r[iS]).lower(), str(r[iE]).strip(), str(r[iP]) if iP!=-1 else "", "", company_val))
             self.conn.commit(); self.update_stats(); self.msg("OK", "Baza zaktualizowana")
-        except: self.msg("Błąd", "Nieudany import")
-
-    # --- FUNKCJA: AKTUALIZACJA Z GOOGLE SHEETS ---
+        except Exception:
+            self.msg("Błąd", "Nieudany import")
 
     def open_google_sheet_url_popup(self, _):
         box = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
@@ -298,24 +282,22 @@ class FutureApp(App):
 
     def _fetch_and_process_google_sheet_thread(self, url):
         try:
-            result = default_api.fetch(url=url, max_length=1024*1024)
-            
-            if "error" in result:
-                Clock.schedule_once(lambda dt: self.msg("Błąd pobierania", result["error"]))
-                return
-            
-            content = result.get("content", "")
-            if not content:
-                Clock.schedule_once(lambda dt: self.msg("Błąd", "Pobrana zawartość jest pusta."))
-                return
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                content_type = resp.headers.get('Content-Type', '').lower()
+                data = resp.read()
 
-            temp_path = Path(self.user_data_dir) / f"google_sheet_temp_{random.randint(1000, 9999)}.csv"
-            with open(temp_path, "w", encoding="utf-8") as f:
-                f.write(content)
-            
-            if url.lower().endswith((".xls", ".xlsx")) or "output=xlsx" in url.lower() or "spreadsheet" in url.lower():
+            temp_path = Path(self.user_data_dir) / f"google_sheet_temp_{random.randint(1000, 9999)}"
+            if url.lower().endswith((".xls", ".xlsx")) or "output=xlsx" in url.lower() or "spreadsheet" in url.lower() or "application/vnd.openxmlformats" in content_type or "application/vnd.ms-excel" in content_type:
+                temp_path = temp_path.with_suffix('.xlsx')
+                with open(temp_path, 'wb') as f:
+                    f.write(data)
                 Clock.schedule_once(lambda dt: self.process_excel(temp_path))
             else:
+                temp_path = temp_path.with_suffix('.csv')
+                text = data.decode('utf-8', errors='replace')
+                with open(temp_path, 'w', encoding='utf-8') as f:
+                    f.write(text)
                 Clock.schedule_once(lambda dt: self._process_csv_from_google_sheet(temp_path))
 
             if temp_path.exists(): os.remove(temp_path)
@@ -334,13 +316,13 @@ class FutureApp(App):
                 return
 
             h = [str(x).lower() for x in raw_data[0]]
-            iN, iS, iE, iP, iC = 0, 1, 2, -1, -1 # Dodano iC dla Company
+            iN, iS, iE, iP, iC = 0, 1, 2, -1, -1
             for i,v in enumerate(h):
                 if "imi" in v: iN=i
                 elif "naz" in v: iS=i
                 elif "@" in v or "mail" in v: iE=i
                 elif "pesel" in v: iP=i
-                elif "firma" in v or "company" in v: iC=i # Rozpoznawanie kolumny firma
+                elif "firma" in v or "company" in v: iC=i
 
             for r in raw_data[1:]:
                 if len(r) > iE and r[iE] and "@" in str(r[iE]):
@@ -358,8 +340,6 @@ class FutureApp(App):
         except Exception as e:
             self.msg("Błąd CSV", f"Problem z parsowaniem CSV: {e}")
 
-
-    # --- LOGIKA WYSYŁKI MASOWEJ (1:1 / BATCHING) ---
 
     def mailing_worker(self):
         cfg_p = Path(self.user_data_dir)/"smtp.json"
@@ -428,13 +408,19 @@ class FutureApp(App):
     def send_single_email(self, srv, cfg, row_data, target) -> (bool, str):
         try:
             nx, sx = str(row_data[self.idx_name]).title(), str(row_data[self.idx_surname]).title()
-            msg = EmailMessage(); ts, tb = self.conn.execute("SELECT val FROM settings WHERE key='t_sub'").fetchone(), self.conn.execute("SELECT val FROM settings WHERE key='t_body'").fetchone()
+            msg = EmailMessage(); ts = self.conn.execute("SELECT val FROM settings WHERE key='t_sub'").fetchone(); tb = self.conn.execute("SELECT val FROM settings WHERE key='t_body'").fetchone()
             msg["Subject"] = (ts[0] if ts else "Raport").replace("{Imię}", nx); msg["From"], msg["To"] = cfg['u'], target
             msg.set_content((tb[0] if tb else "Dzień dobry").replace("{Imię}", nx).replace("{Data}", datetime.now().strftime("%d.%m.%Y")))
             t_f = Path(self.user_data_dir)/f"r_{nx}.xlsx"; wb = Workbook(); ws = wb.active
-            ws.append([self.full_data[0][k] for k in self.export_indices]); ws.append([str(row_data[k]) if (str(row_data[k]).strip()!="") else "0" for k in self.export_indices])
-            self.style_xlsx(ws); wb.save(t_f)
-            with open(t_f, "rb") as f: msg.add_attachment(f.read(), maintype="application", subtype="xlsx", filename=f"Raport_{nx}_{sx}.xlsx")
+            ws.append([self.full_data[0][k] for k in self.export_indices]); ws.append([str(row_data[k]) if (k < len(row_data) and str(row_data[k]).strip()!="") else "0" for k in self.export_indices])
+            self.style_xlsx(ws); wb.save(str(t_f))
+            with open(t_f, "rb") as f: 
+                ctype, _ = mimetypes.guess_type(str(t_f))
+                if ctype:
+                    maintype, subtype = ctype.split('/',1)
+                else:
+                    maintype, subtype = 'application', 'octet-stream'
+                msg.add_attachment(f.read(), maintype=maintype, subtype=subtype, filename=f"Raport_{nx}_{sx}.xlsx")
             for p in self.global_attachments:
                 if os.path.exists(p):
                     ct, _ = mimetypes.guess_type(p); mn, sb = (ct or 'application/octet-stream').split('/', 1)
@@ -462,15 +448,17 @@ class FutureApp(App):
         self.ti_u, self.ti_p = ModernInput(hint_text="Email/Login", text=d.get('u','')), ModernInput(hint_text="Hasło/Klucz", password=True, text=d.get('p',''))
         l.add_widget(Label(text="USTAWIENIA POCZTY", bold=True)); l.add_widget(self.ti_h); l.add_widget(self.ti_pt); l.add_widget(self.ti_u); l.add_widget(self.ti_p)
         bx = BoxLayout(size_hint_y=None, height=dp(45)); self.cb_b = CheckBox(size_hint_x=None, width=dp(45), active=d.get('batch', True)); bx.add_widget(self.cb_b); bx.add_widget(Label(text="Batching (przerwa 60s/30 maili)")); l.add_widget(bx)
-        l.add_widget(ModernButton(text="ZAPISZ KONFIGURACJĘ", on_press=lambda x: [json.dump({'h':self.ti_h.text,'port':self.ti_pt.text,'u':self.ti_u.text,'p':self.ti_p.text,'batch':self.cb_b.active}, open(p,"w")), self.msg("OK","Zapisano")])); l.add_widget(ModernButton(text="TEST POŁĄCZENIA", on_press=lambda x: self.test_smtp_direct(), bg_color=(.1,.7,.4,1))); l.add_widget(ModernButton(text="POWRÓT", on_press=lambda x: setattr(self.sm,'current','home'), bg_color=(.3,.3,.3,1))); self.sc_ref["smtp"].add_widget(l)
+        l.add_widget(ModernButton(text="ZAPISZ KONFIGURACJĘ", on_press=lambda x: [json.dump({'h':self.ti_h.text,'port':self.ti_pt.text,'u':self.ti_u.text,'p':self.ti_p.text,'batch':self.cb_b.active}, open(p,"w")), self.msg("OK","Zapisano")]))
+        l.add_widget(ModernButton(text="TEST POŁĄCZENIA", on_press=lambda x: self.test_smtp_direct(), bg_color=(.1,.7,.4,1)))
+        l.add_widget(ModernButton(text="POWRÓT", on_press=lambda x: setattr(self.sm,'current','home'), bg_color=(.3,.3,.3,1)))
+        self.sc_ref["smtp"].add_widget(l)
 
     def test_smtp_direct(self):
         try: s = self.connect_smtp({'h':self.ti_h.text,'port':self.ti_pt.text,'u':self.ti_u.text,'p':self.ti_p.text}); s.quit(); self.msg("OK", "Serwer SMTP Działa!")
         except Exception as e: self.msg("BŁĄD", str(e)[:60])
 
-    def clear_all_attachments(self, _): [self.global_attachments.clear(), self.update_stats()]
-
-    # --- BRAKUJĄCA WYSYŁKA SPECJALNA ---
+    def clear_all_attachments(self, _=None): 
+        self.global_attachments.clear(); self.update_stats()
 
     def start_special_send_flow(self, _): self.open_picker("special_send")
     def special_send_step_2(self, path):
@@ -502,7 +490,8 @@ class FutureApp(App):
         p.open()
 
     def special_send_step_3(self, path):
-        b = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)); ti_s = ModernInput(hint_text="Temat"); ti_b = ModernInput(hint_text="Treść", multiline=True); b.add_widget(ti_s); b.add_widget(ti_b)
+        b = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)); ti_s = ModernInput(hint_text="Temat"); ti_b = ModernInput(hint_text="Treść", multiline=True)
+        b.add_widget(ti_s); b.add_widget(ti_b)
         def run(_):
             def task():
                 cfg = json.load(open(Path(self.user_data_dir)/"smtp.json")); srv = self.connect_smtp(cfg)
@@ -514,9 +503,9 @@ class FutureApp(App):
             threading.Thread(target=task, daemon=True).start(); p.dismiss()
         b.add_widget(ModernButton(text="WYŚLIJ PLIK", on_press=run)); p = Popup(title="Wiadomość", content=b, size_hint=(.9, .8)); p.open()
 
-    # --- POZOSTAŁE FUNKCJE SYSTEMOWE ---
-
-    def filter_table(self, i, v): self.filtered_data = [self.full_data[0]] + [r for r in self.full_data[1:] if any(v.lower() in str(c).lower() for c in r)]; self.refresh_table()
+    def filter_table(self, i, v): 
+        self.filtered_data = [self.full_data[0]] + [r for r in self.full_data[1:] if any(v.lower() in str(c).lower() for c in r)]
+        self.refresh_table()
     
     def start_mass_mailing(self, _):
         if self.is_mailing_running: return self.msg("!", "Wysyłka już trwa!")
@@ -549,7 +538,10 @@ class FutureApp(App):
                         stream, loc = resolver.openInputStream(uri), Path(self.user_data_dir) / name
                         with open(loc, "wb") as f:
                             buf = bytearray(16384)
-                            while (n := stream.read(buf)) > 0: f.write(buf[:n])
+                            while True:
+                                n = stream.read(buf)
+                                if not n: break
+                                f.write(buf[:n])
                         stream.close()
                         if mode == "data": self.process_excel(loc)
                         elif mode == "book": self.process_book(loc)
@@ -568,7 +560,12 @@ class FutureApp(App):
                 wb = xlrd.open_workbook(path); ws = wb.sheet_by_index(0); raw = [[str(ws.cell_value(r,c)).strip() for c in range(ws.ncols)] for r in range(ws.nrows)]
             else:
                 wb = load_workbook(path, data_only=True); ws = wb.active; raw = [["" if v is None else str(v).strip() for v in r] for r in ws.iter_rows(values_only=True)]
-            h_idx = 0; [h_idx := i for i, r in enumerate(raw[:15]) if any(x in " ".join([str(v) for v in r]).lower() for x in ["imię", "imie", "nazwisko"])]
+            h_idx = 0
+            for i, r in enumerate(raw[:15]):
+                row_text = " ".join([str(v) for v in r]).lower()
+                if any(x in row_text for x in ["imię", "imie", "nazwisko"]):
+                    h_idx = i
+                    break
             self.full_data, self.export_indices = raw[h_idx:], list(range(len(raw[h_idx][0])))
             self.filtered_data = self.full_data
 
@@ -594,7 +591,7 @@ class FutureApp(App):
 
     def setup_tmpl_ui(self):
         l, ti_s, ti_b = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10)), ModernInput(hint_text="Temat {Imię}"), ModernInput(hint_text="Treść...", multiline=True)
-        ts, tb = self.conn.execute("SELECT val FROM settings WHERE key='t_sub'").fetchone(), self.conn.execute("SELECT val FROM settings WHERE key='t_body'").fetchone()
+        ts = self.conn.execute("SELECT val FROM settings WHERE key='t_sub'").fetchone(); tb = self.conn.execute("SELECT val FROM settings WHERE key='t_body'").fetchone()
         ti_s.text, ti_b.text = (ts[0] if ts else ""), (tb[0] if tb else "")
         l.add_widget(Label(text="SZABLON EMAIL", bold=True)); l.add_widget(ti_s); l.add_widget(ti_b)
         l.add_widget(ModernButton(text="ZAPISZ", on_press=lambda x: [self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_sub',ti_s.text)), self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_body',ti_b.text)), self.conn.commit(), self.msg("OK","Wzór zapisany")]))
@@ -602,28 +599,34 @@ class FutureApp(App):
 
     def setup_contacts_ui(self):
         l, top = BoxLayout(orientation="vertical", padding=dp(10)), BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5))
-        self.ti_cs = TextInput(hint_text="Szukaj..."); self.ti_cs.bind(text=self.refresh_contacts_list); top.add_widget(self.ti_cs)
-        top.add_widget(Button(text="+", size_hint_x=0.15, on_press=lambda x: self.form_contact())); top.add_widget(Button(text="Wróć", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'email')))
+        self.ti_cs = ModernInput(hint_text="Szukaj..."); self.ti_cs.bind(text=self.refresh_contacts_list); top.add_widget(self.ti_cs)
+        top.add_widget(ModernButton(text="+", size_hint_x=0.15, on_press=lambda x: self.form_contact())); top.add_widget(ModernButton(text="Wróć", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'email')))
         self.c_ls = GridLayout(cols=1, size_hint_y=None, spacing=dp(10)); self.c_ls.bind(minimum_height=self.c_ls.setter('height'))
         sc = ScrollView(); sc.add_widget(self.c_ls); l.add_widget(top); l.add_widget(sc); self.sc_ref["contacts"].add_widget(l)
 
     def refresh_contacts_list(self, *args):
-        self.c_ls.clear_widgets(); sv = self.ti_cs.text.lower(); rows = self.conn.execute("SELECT name, surname, email, pesel, phone, company FROM contacts ORDER BY surname ASC").fetchall()
+        self.c_ls.clear_widgets(); sv = self.ti_cs.text.lower() if self.ti_cs else ""
+        rows = self.conn.execute("SELECT name, surname, email, pesel, phone, company FROM contacts ORDER BY surname ASC").fetchall()
         for d in rows:
-            if sv and sv not in f"{d[0]} {d[1]} {d[2]} {d[5]}".lower(): continue # Dodano firmę do wyszukiwania
+            if sv and sv not in f"{d[0]} {d[1]} {d[2]} {d[5]}".lower(): continue
             r = BoxLayout(size_hint_y=None, height=dp(125), padding=dp(10))
             with r.canvas.before: Color(*COLOR_CARD); Rectangle(pos=r.pos, size=r.size)
             inf, acts = BoxLayout(orientation="vertical"), BoxLayout(size_hint_x=0.3, orientation="vertical", spacing=dp(4))
             inf.add_widget(Label(text=f"{d[0]} {d[1]}".title(), bold=True, halign="left", text_size=(dp(250),None)))
-            inf.add_widget(Label(text=f"E: {d[2]}\nP: {d[3]}\nT: {d[4] if d[4] else '-'}\nFirma: {d[5] if d[5] else '-'}", font_size='11sp', halign="left", text_size=(dp(250),None), color=(0.7,0.7,0.7,1))) # Wyświetlanie firmy
-            r.add_widget(inf); acts.add_widget(Button(text="Edytuj", on_press=lambda x, data=d: self.form_contact(*data))); acts.add_widget(Button(text="Usuń", background_color=(0.8,0.2,0.2,1), on_press=lambda x, n=d[0], s=d[1]: self.delete_contact(n, s))); r.add_widget(acts); self.c_ls.add_widget(r)
+            inf.add_widget(Label(text=f"E: {d[2]}\nP: {d[3]}\nT: {d[4] if d[4] else '-'}\nFirma: {d[5] if d[5] else '-'}", font_size='11sp', halign="left", text_size=(dp(250),None), color=(0.7,0.7,0.7,1)))
+            r.add_widget(inf); acts.add_widget(ModernButton(text="Edytuj", on_press=lambda x, data=d: self.form_contact(*data))); acts.add_widget(ModernButton(text="Usuń", background_color=(0.8,0.2,0.2,1), on_press=lambda x, n=d[0], s=d[1]: self.delete_contact(n, s))); r.add_widget(acts); self.c_ls.add_widget(r)
 
     def msg(self, tit, txt):
         b = BoxLayout(orientation="vertical", padding=dp(20)); b.add_widget(Label(text=txt, halign="center")); b.add_widget(ModernButton(text="OK", on_press=lambda x: p.dismiss(), height=dp(50), size_hint_y=None)); p = Popup(title=tit, content=b, size_hint=(0.85, 0.45)); p.open()
     def update_stats(self, *a):
         try: self.lbl_stats.text = f"Baza: {self.conn.execute('SELECT count(*) FROM contacts').fetchone()[0]} | Załączniki: {len(self.global_attachments)}"
         except: pass
-    def update_progress(self, d): self.pb.value = int((d/self.total_q)*100); self.pb_label.text = f"Postęp: {d}/{self.total_q}"
+    def update_progress(self, d): 
+        try:
+            self.pb.value = int((d/self.total_q)*100)
+            self.pb_label.text = f"Postęp: {d}/{self.total_q}"
+        except Exception:
+            pass
     
     def finish_mailing(self, s): 
         self.is_mailing_running = False
@@ -666,8 +669,8 @@ class FutureApp(App):
                 self.apply_columns_and_refresh(new_export_indices)
                 save_popup.dismiss()
 
-            btns_layout.add_widget(Button(text="Tak, zapamiętaj", on_press=save_and_apply, background_color=(0,0.6,0,1)))
-            btns_layout.add_widget(Button(text="Nie, tylko zastosuj", on_press=apply_only, background_color=(0.7,0,0,1)))
+            btns_layout.add_widget(ModernButton(text="Tak, zapamiętaj", on_press=save_and_apply, height=dp(45), bg_color=(0,0.6,0,1)))
+            btns_layout.add_widget(ModernButton(text="Nie, tylko zastosuj", on_press=apply_only, height=dp(45), bg_color=(0.7,0,0,1)))
             save_box.add_widget(btns_layout)
             
             save_popup = Popup(title="Zapisz kolumny?", content=save_box, size_hint=(0.9, 0.45), auto_dismiss=False)
@@ -694,7 +697,7 @@ class FutureApp(App):
             row.add_widget(Label(text=f"OK: {ok} | Błędy: {fl} | Pominięto: {sk}", font_size='13sp', halign="left", text_size=(dp(300), None)))
 
             btn_box = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(5))
-            btn_box.add_widget(Button(text="Pokaż logi", on_press=lambda x, t=det_json: self.show_details(t)))
+            btn_box.add_widget(ModernButton(text="Pokaż logi", on_press=lambda x, t=det_json: self.show_details(t)))
             
             has_fails = False
             if det_json:
@@ -706,16 +709,14 @@ class FutureApp(App):
                     pass
             
             if has_fails:
-                btn_box.add_widget(Button(text="Ponów nieudane", background_color=(0.8, 0.4, 0.1, 1), 
-                                          on_press=lambda x, report_id=r_id, orig_filename=filename: self.start_retry_mailing(report_id, orig_filename)))
+                btn_box.add_widget(ModernButton(text="Ponów nieudane", background_color=(0.8, 0.4, 0.1, 1), on_press=lambda x, report_id=r_id, orig_filename=filename: self.start_retry_mailing(report_id, orig_filename)))
             else:
-                btn_box.add_widget(Button(text="Brak nieudanych", background_color=(0.5, 0.5, 0.5, 1), disabled=True))
-
+                btn_box.add_widget(ModernButton(text="Brak nieudanych", background_color=(0.5, 0.5, 0.5, 1), height=dp(38)))
             row.add_widget(btn_box)
             self.r_grid.add_widget(row)
 
     def show_details(self, t):
-        b = BoxLayout(orientation="vertical", padding=dp(10)); ti = TextInput(text=str(t), readonly=True, font_size='11sp'); b.add_widget(ti); b.add_widget(Button(text="ZAMKNIJ", size_hint_y=0.2, on_press=lambda x: p.dismiss())); p = Popup(title="Logi", content=b, size_hint=(.9,.8)); p.open()
+        b = BoxLayout(orientation="vertical", padding=dp(10)); ti = TextInput(text=str(t), readonly=True, font_size='11sp'); b.add_widget(ti); b.add_widget(ModernButton(text="ZAMKNIJ", on_press=lambda x: p.dismiss(), size_hint_y=0.2)); p = Popup(title="Logi", content=b, size_hint=(.9,.8)); p.open()
     
     def start_retry_mailing(self, report_id, original_filename):
         if self.is_mailing_running: return self.msg("!", "Wysyłka już trwa!")
@@ -750,32 +751,31 @@ class FutureApp(App):
         except Exception as e:
             self.msg("Błąd", f"Wystąpił błąd podczas ponawiania: {e}")
 
-
     def ask_before_send_worker(self, row, email, n, s):
         def dec(v): self.user_decision = "send" if v else "skip"; self.wait_for_user = False; px.dismiss()
         box = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10)); box.add_widget(Label(text=f"POTWIERDŹ:\n[b]{n} {s}[/b]\n{email}", markup=True, halign="center"))
-        btns = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(10)); btns.add_widget(Button(text="WYŚLIJ", on_press=lambda x: dec(True), background_color=(0,0.6,0,1))); btns.add_widget(Button(text="POMIŃ", on_press=lambda x: dec(False), background_color=(0.7,0,0,1)))
+        btns = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(10)); btns.add_widget(ModernButton(text="WYŚLIJ", on_press=lambda x: dec(True), height=dp(45), bg_color=(0,0.6,0,1))); btns.add_widget(ModernButton(text="POMIŃ", on_press=lambda x: dec(False), height=dp(45), bg_color=(0.7,0,0,1)))
         box.add_widget(btns); px = Popup(title="Weryfikacja", content=box, size_hint=(0.9, 0.45), auto_dismiss=False); px.open()
     def export_single_row(self, r):
         p = Path("/storage/emulated/0/Documents/FutureExport") if platform=="android" else Path("./exports"); p.mkdir(parents=True, exist_ok=True)
         nx, sx = str(r[self.idx_name]).title(), str(r[self.idx_surname]).title(); wb = Workbook(); ws = wb.active
         ws.append([self.full_data[0][k] for k in self.export_indices]); ws.append([str(r[k]) if (k < len(r) and str(r[k]).strip() != "") else "0" for k in self.export_indices])
-        self.style_xlsx(ws); wb.save(p/f"Raport_{nx}_{sx}.xlsx"); self.msg("OK", f"Zapisano PDF dla: {nx}")
+        self.style_xlsx(ws); wb.save(str(p/f"Raport_{nx}_{sx}.xlsx")); self.msg("OK", f"Zapisano PDF dla: {nx}")
     def delete_contact(self, n, s):
         def pr(_):
             self.conn.execute("DELETE FROM contacts WHERE name=? AND surname=?", (n, s))
-            self.conn.execute("DELETE FROM employee_clothes WHERE contact_name=? AND contact_surname=?", (n, s)) # Usuń też ubrania
+            self.conn.execute("DELETE FROM employee_clothes WHERE contact_name=? AND contact_surname=?", (n, s))
             self.conn.commit(); px.dismiss(); self.refresh_contacts_list(); self.update_stats()
-        px = Popup(title="Usuń?", content=Button(text="USUŃ KONTAKT", on_press=pr, background_color=(1,0,0,1)), size_hint=(0.7,0.3)); px.open()
-    def form_contact(self, n="", s="", e="", pes="", ph="", company=""): # Dodano company
+        px = Popup(title="Usuń?", content=ModernButton(text="USUŃ KONTAKT", on_press=pr, height=dp(50), bg_color=(1,0,0,1)), size_hint=(0.7,0.3)); px.open()
+    def form_contact(self, n="", s="", e="", pes="", ph="", company=""):
         b = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
         f_ins = [
-            TextInput(text=str(n), hint_text="Imię"),
-            TextInput(text=str(s), hint_text="Nazwisko"),
-            TextInput(text=str(e), hint_text="Email"),
-            TextInput(text=str(pes), hint_text="PESEL"),
-            TextInput(text=str(ph), hint_text="Telefon"),
-            TextInput(text=str(company), hint_text="Firma") # Pole dla firmy
+            ModernInput(text=str(n), hint_text="Imię"),
+            ModernInput(text=str(s), hint_text="Nazwisko"),
+            ModernInput(text=str(e), hint_text="Email"),
+            ModernInput(text=str(pes), hint_text="PESEL"),
+            ModernInput(text=str(ph), hint_text="Telefon"),
+            ModernInput(text=str(company), hint_text="Firma")
         ]
         for f in f_ins: b.add_widget(f)
         def save(_):
@@ -785,21 +785,18 @@ class FutureApp(App):
                 f_ins[2].text.strip(),
                 f_ins[3].text.strip(),
                 f_ins[4].text.strip(),
-                f_ins[5].text.strip() # Zapisz firmę
+                f_ins[5].text.strip()
             ))
             self.conn.commit(); px.dismiss(); self.refresh_contacts_list(); self.update_stats()
         b.add_widget(ModernButton(text="ZAPISZ", on_press=save)); px = Popup(title="Kontakt", content=b, size_hint=(0.9, 0.85)); px.open()
-    def clear_all_attachments(self, _): [self.global_attachments.clear(), self.update_stats()]
-
-    # --- NOWY EKRAN "CIUCHY" ---
 
     def setup_clothes_ui(self):
         l = BoxLayout(orientation="vertical", padding=dp(10))
         top = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5))
-        self.ti_clothes_search = TextInput(hint_text="Szukaj pracownika (imię, nazwisko, firma)...")
+        self.ti_clothes_search = ModernInput(hint_text="Szukaj pracownika (imię, nazwisko, firma)...")
         self.ti_clothes_search.bind(text=self.refresh_employee_list_for_clothes)
         top.add_widget(self.ti_clothes_search)
-        top.add_widget(Button(text="WRÓĆ", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
+        top.add_widget(ModernButton(text="WRÓĆ", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
         l.add_widget(top)
 
         self.clothes_employee_list = GridLayout(cols=1, size_hint_y=None, spacing=dp(10))
@@ -810,17 +807,13 @@ class FutureApp(App):
 
     def refresh_employee_list_for_clothes(self, *args):
         self.clothes_employee_list.clear_widgets()
-        search_val = self.ti_clothes_search.text.lower()
-        
-        # Pobierz wszystkich pracowników z bazy
+        search_val = (self.ti_clothes_search.text or "").lower()
         query = "SELECT name, surname, company FROM contacts ORDER BY surname ASC"
         employees = self.conn.execute(query).fetchall()
 
         for name, surname, company in employees:
             full_name = f"{name.title()} {surname.title()}"
             company_display = f"Firma: {company}" if company else "Brak firmy"
-            
-            # Filtrowanie
             if search_val and search_val not in f"{name} {surname} {company}".lower():
                 continue
 
@@ -833,8 +826,8 @@ class FutureApp(App):
             row.add_widget(info_layout)
 
             actions_layout = BoxLayout(size_hint_x=0.4, orientation="vertical", spacing=dp(5))
-            actions_layout.add_widget(Button(text="Edytuj Rozmiary", on_press=lambda x, n=name, s=surname: self.show_edit_clothes_popup(n, s)))
-            actions_layout.add_widget(Button(text="Wydaj Ciuchy", on_press=lambda x, n=name, s=surname, c=company: self.show_issue_clothes_popup(n, s, c)))
+            actions_layout.add_widget(ModernButton(text="Edytuj Rozmiary", on_press=lambda x, n=name, s=surname: self.show_edit_clothes_popup(n, s), height=dp(44)))
+            actions_layout.add_widget(ModernButton(text="Wydaj Ciuchy", on_press=lambda x, n=name, s=surname, c=company: self.show_issue_clothes_popup(n, s, c), height=dp(44)))
             row.add_widget(actions_layout)
 
             self.clothes_employee_list.add_widget(row)
@@ -847,44 +840,35 @@ class FutureApp(App):
         grid = GridLayout(cols=2, size_hint_y=None, spacing=dp(5))
         grid.bind(minimum_height=grid.setter('height'))
         
-        cloth_inputs = {} # Słownik do przechowywania TextInputów dla rozmiarów
+        cloth_inputs = {}
 
-        # Pobierz wszystkie typy ubrań
         clothes_types = self.conn.execute("SELECT id, name FROM clothes_types ORDER BY name").fetchall()
         
-        # Pobierz aktualne rozmiary dla pracownika
-        current_sizes = {
-            (ct_id, ct_name): size for ct_name, ct_id, size in 
-            self.conn.execute("""
-                SELECT ct.name, ct.id, ec.size 
-                FROM clothes_types ct 
-                LEFT JOIN employee_clothes ec ON ct.id = ec.cloth_type_id 
-                WHERE ec.contact_name=? AND ec.contact_surname=?
-            """, (employee_name, employee_surname)).fetchall()
-        }
+        current_sizes_rows = self.conn.execute("SELECT cloth_type_id, size FROM employee_clothes WHERE contact_name=? AND contact_surname=?", (employee_name, employee_surname)).fetchall()
+        current_sizes = {row[0]: row[1] for row in current_sizes_rows}
 
         for c_id, c_name in clothes_types:
             grid.add_widget(Label(text=c_name, halign="left", text_size=(dp(150), None), size_hint_x=None, width=dp(150)))
-            text_input = TextInput(text=current_sizes.get((c_id, c_name), ''), hint_text="Rozmiar", multiline=False, size_hint_x=None, width=dp(150))
-            cloth_inputs[(c_id, c_name)] = text_input
+            text_input = ModernInput(text=current_sizes.get(c_id, ''), hint_text="Rozmiar", multiline=False, size_hint_x=None, width=dp(150))
+            cloth_inputs[c_id] = text_input
             grid.add_widget(text_input)
         
         scroll_view.add_widget(grid)
         box.add_widget(scroll_view)
 
         def save_sizes(instance):
-            for (c_id, c_name), text_input in cloth_inputs.items():
+            for c_id, text_input in cloth_inputs.items():
                 size_val = text_input.text.strip()
                 if size_val:
                     self.conn.execute("INSERT OR REPLACE INTO employee_clothes (contact_name, contact_surname, cloth_type_id, size) VALUES (?,?,?,?)",
                                       (employee_name, employee_surname, c_id, size_val))
-                else: # Jeśli rozmiar jest pusty, usuń wpis
+                else:
                     self.conn.execute("DELETE FROM employee_clothes WHERE contact_name=? AND contact_surname=? AND cloth_type_id=?",
                                       (employee_name, employee_surname, c_id))
             self.conn.commit()
             self.msg("OK", "Rozmiary zapisane!")
             popup.dismiss()
-            self.refresh_employee_list_for_clothes() # Odśwież listę po zapisie
+            self.refresh_employee_list_for_clothes()
 
         box.add_widget(ModernButton(text="ZAPISZ", on_press=save_sizes, height=dp(50), size_hint_y=None))
         popup = Popup(title="Edycja rozmiarów", content=box, size_hint=(0.9, 0.85), auto_dismiss=False)
@@ -899,7 +883,6 @@ class FutureApp(App):
         issue_type_label = Label(text="Typ wydania:", size_hint_y=None, height=dp(30), halign="left", text_size=(dp(300), None))
         box.add_widget(issue_type_label)
 
-        # Opcje wyboru: wydanie dla osoby czy dla firmy
         radio_layout = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
         
         cb_person = CheckBox(group='issue_type', active=True, size_hint_x=None, width=dp(40))
@@ -942,13 +925,12 @@ class FutureApp(App):
             self.conn.commit()
             self.msg("OK", f"Wydano ubrania dla: {name.title()} {surname.title()}")
         elif issuance_type == 'company':
-            # Dla wydania firmowego, name i surname mogą być puste, ale firma jest kluczowa
             self.conn.execute("INSERT INTO clothes_issuance_log (contact_name, contact_surname, company, issuance_date, issued_by, issuance_type) VALUES (?,?,?,?,?,?)",
                               (None, None, company, current_date, issued_by, 'company'))
             self.conn.commit()
             self.msg("OK", f"Wydano ubrania dla firmy: {company}")
         
-        self.refresh_employee_list_for_clothes() # Odśwież listę po wydaniu
+        self.refresh_employee_list_for_clothes()
 
 if __name__ == "__main__":
     FutureApp().run()
