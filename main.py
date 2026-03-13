@@ -98,8 +98,8 @@ class ClothesSizesScreen(Screen):
             pass
         root = BoxLayout(orientation='vertical')
         top = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(8), padding=dp(8))
-        top.add_widget(Label(text="Rozmiary pracowników", bold=True))
-        top.add_widget(ModernButton(text="Wróć", size_hint_x=None, width=dp(120), on_press=lambda x: setattr(App.get_running_app().sm, 'current', 'clothes')))
+        top.add_widget(Label(text="Rozmiary pracownik\u00f3w", bold=True))
+        top.add_widget(ModernButton(text="Wr\u00f3\u0107", size_hint_x=None, width=dp(120), on_press=lambda x: setattr(App.get_running_app().sm, 'current', 'clothes')))
         root.add_widget(top)
         sc = ScrollView()
         self.list_layout = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=dp(6))
@@ -128,7 +128,7 @@ class ClothesSizesScreen(Screen):
     def edit(self,row):
         box = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(6))
         fields = []
-        labels = ["Imię","Nazwisko","Zakład","Koszulka","Bluza","Spodnie","Kurtka","Buty"]
+        labels = ["Imi\u0119","Nazwisko","Zak\u0142ad","Koszulka","Bluza","Spodnie","Kurtka","Buty"]
         for i in range(1,9):
             box.add_widget(Label(text=labels[i-1], size_hint_y=None, height=dp(24)))
             ti = TextInput(text=str(row[i]), multiline=False)
@@ -170,8 +170,8 @@ class ClothesOrdersScreen(Screen):
             pass
         root = BoxLayout(orientation='vertical', spacing=dp(6))
         header = BoxLayout(size_hint_y=None, height=dp(50))
-        header.add_widget(Label(text="Zamówienia", bold=True))
-        header.add_widget(Button(text="Nowe zamówienie", size_hint_x=None, width=dp(180), on_press=lambda x: self.create_order()))
+        header.add_widget(Label(text="Zam\u00f3wienia", bold=True))
+        header.add_widget(Button(text="Nowe zam\u00f3wienie", size_hint_x=None, width=dp(180), on_press=lambda x: self.create_order()))
         root.add_widget(header)
         sc = ScrollView()
         self.list_layout = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=dp(6))
@@ -186,7 +186,7 @@ class ClothesOrdersScreen(Screen):
         db.conn.execute("""
         INSERT INTO clothes_orders(date,plant,status)
         VALUES (?,?,?)
-        """,(datetime.now().strftime("%Y-%m-%d"),"Zakład","Do zamówienia"))
+        """,(datetime.now().strftime("%Y-%m-%d"),"Zak\u0142ad","Do zam\u00f3wienia"))
         db.conn.commit()
         self.refresh()
 
@@ -197,9 +197,9 @@ class ClothesOrdersScreen(Screen):
         """).fetchall()
         for r in rows:
             box = BoxLayout(size_hint_y=None,height=dp(70), padding=dp(6))
-            box.add_widget(Label(text=f"Zamówienie #{r[0]}  {r[2]}  {r[3]}"))
+            box.add_widget(Label(text=f"Zam\u00f3wienie #{r[0]}  {r[2]}  {r[3]}"))
             box.add_widget(Button(
-                text="Zmień",
+                text="Zmie\u0144",
                 size_hint_x=0.2,
                 on_press=lambda x,i=r[0]:self.change(i)
             ))
@@ -209,7 +209,7 @@ class ClothesOrdersScreen(Screen):
         db = App.get_running_app()
         db.conn.execute("""
         UPDATE clothes_orders
-        SET status='Zamówione'
+        SET status='Zam\u00f3wione'
         WHERE id=?
         """,(id,))
         db.conn.commit()
@@ -242,15 +242,15 @@ class ClothesStatusScreen(Screen):
         """).fetchall()
         for r in rows:
             box = BoxLayout(size_hint_y=None,height=dp(70), padding=dp(6))
-            box.add_widget(Label(text=f"Zamówienie #{r[0]}  {r[2]}  {r[3]}"))
-            box.add_widget(Button(text="Zmień", size_hint_x=0.2, on_press=lambda x,i=r[0]: self.change(i)))
+            box.add_widget(Label(text=f"Zam\u00f3wienie #{r[0]}  {r[2]}  {r[3]}"))
+            box.add_widget(Button(text="Zmie\u0144", size_hint_x=0.2, on_press=lambda x,i=r[0]: self.change(i)))
             self.list_layout.add_widget(box)
 
     def change(self,id):
         db = App.get_running_app()
         db.conn.execute("""
         UPDATE clothes_orders
-        SET status='Zamówione'
+        SET status='Zam\u00f3wione'
         WHERE id=?
         """,(id,))
         db.conn.commit()
@@ -268,7 +268,7 @@ class ClothesReportsScreen(Screen):
             pass
         root = BoxLayout(orientation='vertical', padding=dp(6), spacing=dp(6))
         header = BoxLayout(size_hint_y=None, height=dp(50))
-        header.add_widget(Label(text="Raporty wydanych ubrań", bold=True))
+        header.add_widget(Label(text="Raporty wydanych ubra\u0144", bold=True))
         header.add_widget(Button(text="Generuj PDF", size_hint_x=None, width=dp(160), on_press=lambda x: self.generate()))
         root.add_widget(header)
         self.add_widget(root)
@@ -276,7 +276,7 @@ class ClothesReportsScreen(Screen):
 
     def generate(self):
         if canvas is None:
-            App.get_running_app().msg("Brak biblioteki", "Brak reportlab - PDF niedostępny")
+            App.get_running_app().msg("Brak biblioteki", "Brak reportlab - PDF niedost\u0119pny")
             return
         db = App.get_running_app()
         rows = db.conn.execute("""
@@ -349,6 +349,154 @@ class FutureApp(App):
             pass
         self.conn.commit()
 
+    def patch_contacts_database(self):
+        try:
+            self.conn.execute("ALTER TABLE contacts ADD COLUMN plant TEXT")
+        except:
+            pass
+        try:
+            self.conn.execute("ALTER TABLE contacts ADD COLUMN hire_date TEXT")
+        except:
+            pass
+        try:
+            self.conn.execute("ALTER TABLE contacts ADD COLUMN clothes_size TEXT")
+        except:
+            pass
+        try:
+            self.conn.execute("ALTER TABLE contacts ADD COLUMN shoes_size TEXT")
+        except:
+            pass
+        self.conn.execute("""
+        CREATE TABLE IF NOT EXISTS clothes_history(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            surname TEXT,
+            item TEXT,
+            size TEXT,
+            date TEXT
+        )
+        """)
+        self.conn.commit()
+
+    def call_contact(self, phone):
+        if not phone:
+            self.msg("Info","Brak numeru telefonu")
+            return
+        if platform != "android":
+            self.msg("Telefon", phone)
+            return
+        try:
+            from jnius import autoclass
+            Intent = autoclass("android.content.Intent")
+            Uri = autoclass("android.net.Uri")
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            intent = Intent(Intent.ACTION_DIAL)
+            intent.setData(Uri.parse("tel:"+phone))
+            PythonActivity.mActivity.startActivity(intent)
+        except Exception as e:
+            self.msg("Błąd", str(e))
+
+    def whatsapp_contact(self, phone):
+        if not phone:
+            self.msg("Info","Brak numeru telefonu")
+            return
+        if platform != "android":
+            self.msg("WhatsApp", phone)
+            return
+        try:
+            from jnius import autoclass
+            Intent = autoclass("android.content.Intent")
+            Uri = autoclass("android.net.Uri")
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            url = "https://wa.me/"+phone
+            intent = Intent(Intent.ACTION_VIEW)
+            intent.setData(Uri.parse(url))
+            PythonActivity.mActivity.startActivity(intent)
+        except Exception as e:
+            self.msg("Błąd", str(e))
+
+    def open_clothes_panel(self, name, surname):
+        root = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(10))
+        root.add_widget(Label(
+            text=f"Ubrania robocze\n{name} {surname}",
+            size_hint_y=None,
+            height=dp(40)
+        ))
+        size_clothes = TextInput(
+            hint_text="Rozmiar ubrania",
+            size_hint_y=None,
+            height=dp(40)
+        )
+        size_shoes = TextInput(
+            hint_text="Rozmiar butów",
+            size_hint_y=None,
+            height=dp(40)
+        )
+        item = TextInput(
+            hint_text="Element (np. kurtka, spodnie)",
+            size_hint_y=None,
+            height=dp(40)
+        )
+        root.add_widget(size_clothes)
+        root.add_widget(size_shoes)
+        root.add_widget(item)
+        def save_clothes(x):
+            from datetime import datetime
+            self.conn.execute("""
+            UPDATE contacts
+            SET clothes_size=?, shoes_size=?
+            WHERE name=? AND surname=?
+            """,(size_clothes.text,size_shoes.text,name,surname))
+            if item.text:
+                self.conn.execute("""
+                INSERT INTO clothes_history
+                (name,surname,item,size,date)
+                VALUES(?,?,?,?,?)
+                """,(
+                    name,
+                    surname,
+                    item.text,
+                    size_clothes.text,
+                    datetime.now().strftime("%Y-%m-%d")
+                ))
+            self.conn.commit()
+            self.msg("OK","Zapisano")
+        root.add_widget(Button(
+            text="ZAPISZ",
+            size_hint_y=None,
+            height=dp(45),
+            on_press=save_clothes
+        ))
+        Popup(
+            title="Ubrania robocze",
+            content=root,
+            size_hint=(0.9,0.8)
+        ).open()
+
+    def contact_quick_actions(self, phone, name, surname):
+        box = BoxLayout(size_hint_x=0.15, orientation="vertical", spacing=dp(4))
+        box.add_widget(Button(
+            text="📞",
+            on_press=lambda x: self.call_contact(phone)
+        ))
+        box.add_widget(Button(
+            text="💬",
+            on_press=lambda x: self.whatsapp_contact(phone)
+        ))
+        box.add_widget(Button(
+            text="👕",
+            on_press=lambda x: self.open_clothes_panel(name,surname)
+        ))
+        return box
+
+    def contact_description(self, email, pesel, phone, hire_date):
+        return (
+            f"E: {email}\n"
+            f"P: {pesel}\n"
+            f"T: {phone}\n"
+            f"📅 Zatrudniony: {hire_date}"
+        )
+
     def init_db(self):
         db_p = Path(self.user_data_dir) / "future_v20.db"
         self.conn = sqlite3.connect(str(db_p), check_same_thread=False)
@@ -404,6 +552,10 @@ class FutureApp(App):
             self.patch_contact_extra_fields()
         except:
             pass
+        try:
+            self.patch_contacts_database()
+        except:
+            pass
 
     def add_screens(self):
         names = ["home", "table", "email", "smtp", "tmpl", "contacts", "report", "cars", "clothes", "paski", "pracownicy", "zaklady", "settings"]
@@ -440,9 +592,9 @@ class FutureApp(App):
         grid.add_widget(ModernButton(text="Ubranie robocze", on_press=lambda x: setattr(self.sm, 'current', 'clothes'), **btn_props))
         grid.add_widget(ModernButton(text="Paski", on_press=lambda x: setattr(self.sm, 'current', 'paski'), **btn_props))
         grid.add_widget(ModernButton(text="Pracownicy", on_press=lambda x: setattr(self.sm, 'current', 'pracownicy'), **btn_props))
-        grid.add_widget(ModernButton(text="Zakłady", on_press=lambda x: setattr(self.sm, 'current', 'zaklady'), **btn_props))
+        grid.add_widget(ModernButton(text="Zak\u0142ady", on_press=lambda x: setattr(self.sm, 'current', 'zaklady'), **btn_props))
         grid.add_widget(ModernButton(text="Ustawienia", on_press=lambda x: setattr(self.sm, 'current', 'settings'), **btn_props))
-        grid.add_widget(ModernButton(text="Wyjście", on_press=lambda x: App.get_running_app().stop(), bg_color=(0.6,0.1,0.1,1), **btn_props))
+        grid.add_widget(ModernButton(text="Wyj\u015bcie", on_press=lambda x: App.get_running_app().stop(), bg_color=(0.6,0.1,0.1,1), **btn_props))
         sv.add_widget(grid)
         root.add_widget(sv)
         self.sc_ref["home"].add_widget(root)
@@ -458,10 +610,10 @@ class FutureApp(App):
         inner.bind(minimum_width=inner.setter('width'))
         btn_w = dp(160)
         inner.add_widget(Button(text="Rozmiary", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'sizes')))
-        inner.add_widget(Button(text="Zamówienia", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'orders')))
+        inner.add_widget(Button(text="Zam\u00f3wienia", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'orders')))
         inner.add_widget(Button(text="Status", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'status')))
         inner.add_widget(Button(text="Raporty", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'reports')))
-        inner.add_widget(ModernButton(text="Wróć", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.sm, 'current', 'home')))
+        inner.add_widget(ModernButton(text="Wr\u00f3\u0107", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.sm, 'current', 'home')))
         hs.add_widget(inner)
         container.add_widget(hs)
         self.clothes_sm = ScreenManager(transition=SlideTransition())
@@ -528,7 +680,7 @@ class FutureApp(App):
                 wb = load_workbook(path, data_only=True); ws = wb.active; raw = [["" if v is None else str(v).strip() for v in r] for r in ws.iter_rows(values_only=True)]
             h_idx = 0
             for i, r in enumerate(raw[:15]):
-                if any(x in " ".join([str(v) for v in r]).lower() for x in ["imię", "imie", "nazwisko"]): h_idx = i; break
+                if any(x in " ".join([str(v) for v in r]).lower() for x in ["imi\u0119", "imie", "nazwisko"]): h_idx = i; break
             self.full_data = raw[h_idx:]
             self.filtered_data = self.full_data
             self.export_indices = list(range(len(self.full_data[0])))
@@ -548,12 +700,12 @@ class FutureApp(App):
         pes = str(row[self.idx_pesel]).strip() if self.idx_pesel != -1 else ""
         res = self.conn.execute("SELECT email FROM contacts WHERE pesel=? AND pesel != ''", (pes,)).fetchone() if pes else None
         if not res: res = self.conn.execute("SELECT email FROM contacts WHERE name=? AND surname=? COLLATE NOCASE", (name.lower(), sur.lower())).fetchone()
-        if not res: return self.msg("Błąd", f"Brak maila dla: {name}")
+        if not res: return self.msg("B\u0142\u0105d", f"Brak maila dla: {name}")
         def task():
             cfg_p = Path(self.user_data_dir)/"smtp.json"
             if not cfg_p.exists(): return Clock.schedule_once(lambda d: self.msg("!", "Brak SMTP"))
             cfg = json.load(open(cfg_p)); srv = self.connect_smtp(cfg)
-            if self.send_single_email(srv, cfg, row, res[0]): Clock.schedule_once(lambda d: self.msg("OK", f"Wysłano do: {name}"))
+            if self.send_single_email(srv, cfg, row, res[0]): Clock.schedule_once(lambda d: self.msg("OK", f"Wys\u0142ano do: {name}"))
             srv.quit()
         threading.Thread(target=task, daemon=True).start()
 
@@ -584,7 +736,7 @@ class FutureApp(App):
         try:
             wb = load_workbook(path, data_only=True); ws = wb.active; raw = list(ws.iter_rows(values_only=True))
             if not raw or not raw[0]:
-                self.msg("Błąd", "Pusty plik")
+                self.msg("B\u0142\u0105d", "Pusty plik")
                 return
             headers = ["" if v is None else str(v).strip() for v in raw[0]]
             h_low = [h.lower() for h in headers]
@@ -642,11 +794,11 @@ class FutureApp(App):
                 clothes_count = 0
             new_ver = self._increment_db_version()
             self.update_stats()
-            self.msg("OK", f"Baza ubrań zaktualizowana. Rekordy ubrań: {clothes_count}\nDane ubrań dostępne w module 'Ubranie robocze'.")
+            self.msg("OK", f"Baza ubra\u0144 zaktualizowana. Rekordy ubra\u0144: {clothes_count}\nDane ubra\u0144 dost\u0119pne w module 'Ubranie robocze'.")
             self.log(f"Imported book: {path} | clothes={clothes_count}")
         except Exception as e:
             self.log(f"process_book error: {traceback.format_exc()}")
-            self.msg("Błąd", f"Nieudany import: {str(e)[:120]}")
+            self.msg("B\u0142\u0105d", f"Nieudany import: {str(e)[:120]}")
 
     def _sanitize_col(self, name):
         s = "".join(c if c.isalnum() else "_" for c in str(name).strip().lower())
@@ -693,7 +845,7 @@ class FutureApp(App):
                         else: time.sleep(random.uniform(3, 7))
                 else: self.stats["skip"] += 1; self.session_details.append(f"SKIP: {n} {s}")
                 Clock.schedule_once(lambda dt: self.update_progress(self.total_q - len(self.queue)))
-            srv.quit(); self.finish_mailing("Zakończono")
+            srv.quit(); self.finish_mailing("Zako\u0144czono")
         except Exception as e:
             self.log(f"mailing_worker error: {traceback.format_exc()}")
             self.finish_mailing(f"Error: {e}")
@@ -705,8 +857,8 @@ class FutureApp(App):
         try:
             nx, sx = str(row_data[self.idx_name]).title(), str(row_data[self.idx_surname]).title()
             msg = EmailMessage(); ts, tb = self.conn.execute("SELECT val FROM settings WHERE key='t_sub'").fetchone(), self.conn.execute("SELECT val FROM settings WHERE key='t_body'").fetchone()
-            msg["Subject"] = (ts[0] if ts else "Raport").replace("{Imię}", nx); msg["From"], msg["To"] = cfg['u'], target
-            msg.set_content((tb[0] if tb else "Dzień dobry").replace("{Imię}", nx).replace("{Data}", datetime.now().strftime("%d.%m.%Y")))
+            msg["Subject"] = (ts[0] if ts else "Raport").replace("{Imi\u0119}", nx); msg["From"], msg["To"] = cfg['u'], target
+            msg.set_content((tb[0] if tb else "Dzie\u0144 dobry").replace("{Imi\u0119}", nx).replace("{Data}", datetime.now().strftime("%d.%m.%Y")))
             t_f = Path(self.user_data_dir)/f"r_{nx}.xlsx"; wb = Workbook(); ws = wb.active
             ws.append([self.full_data[0][k] for k in self.export_indices]); ws.append([str(row_data[k]) if (str(row_data[k]).strip()!="") else "0" for k in self.export_indices])
             self.style_xlsx(ws); wb.save(t_f)
@@ -737,17 +889,17 @@ class FutureApp(App):
         self.sc_ref["smtp"].clear_widgets()
         l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(8)); p = Path(self.user_data_dir)/"smtp.json"; d = json.load(open(p)) if p.exists() else {}
         self.ti_h, self.ti_pt = ModernInput(hint_text="Host", text=d.get('h','')), ModernInput(hint_text="Port", text=str(d.get('port','587')))
-        self.ti_u, self.ti_p = ModernInput(hint_text="Email/Login", text=d.get('u','')), ModernInput(hint_text="Hasło/Klucz", password=True, text=d.get('p',''))
+        self.ti_u, self.ti_p = ModernInput(hint_text="Email/Login", text=d.get('u','')), ModernInput(hint_text="Has\u0142o/Klucz", password=True, text=d.get('p',''))
         l.add_widget(Label(text="USTAWIENIA POCZTY", bold=True)); l.add_widget(self.ti_h); l.add_widget(self.ti_pt); l.add_widget(self.ti_u); l.add_widget(self.ti_p)
         bx = BoxLayout(size_hint_y=None, height=dp(45)); self.cb_b = CheckBox(size_hint_x=None, width=dp(45), active=d.get('batch', True)); bx.add_widget(self.cb_b); bx.add_widget(Label(text="Batching (przerwa 60s/30 maili)")); l.add_widget(bx)
-        l.add_widget(ModernButton(text="ZAPISZ KONFIGURACJĘ", on_press=lambda x: [json.dump({'h':self.ti_h.text,'port':self.ti_pt.text,'u':self.ti_u.text,'p':self.ti_p.text,'batch':self.cb_b.active}, open(p,"w")), self.msg("OK","Zapisano")]))
-        l.add_widget(ModernButton(text="TEST POŁĄCZENIA", on_press=lambda x: self.test_smtp_direct(), bg_color=(.1,.7,.4,1)))
+        l.add_widget(ModernButton(text="ZAPISZ KONFIGURACJ\u0118", on_press=lambda x: [json.dump({'h':self.ti_h.text,'port':self.ti_pt.text,'u':self.ti_u.text,'p':self.ti_p.text,'batch':self.cb_b.active}, open(p,"w")), self.msg("OK","Zapisano")]))
+        l.add_widget(ModernButton(text="TEST PO\u0141\u0104CZENIA", on_press=lambda x: self.test_smtp_direct(), bg_color=(.1,.7,.4,1)))
         l.add_widget(ModernButton(text="POKAŻ LOGI", on_press=self.show_logs))
         l.add_widget(ModernButton(text="POWRÓT", on_press=lambda x: setattr(self.sm,'current','home'), bg_color=(.3,.3,.3,1))); self.sc_ref["smtp"].add_widget(l)
 
     def test_smtp_direct(self):
-        try: s = self.connect_smtp({'h':self.ti_h.text,'port':self.ti_pt.text,'u':self.ti_u.text,'p':self.ti_p.text}); s.quit(); self.msg("OK", "Serwer SMTP Działa!"); self.log("SMTP test succeeded")
-        except Exception as e: self.log(f"test_smtp_direct error: {traceback.format_exc()}"); self.msg("BŁĄD", str(e)[:60])
+        try: s = self.connect_smtp({'h':self.ti_h.text,'port':self.ti_pt.text,'u':self.ti_u.text,'p':self.ti_p.text}); s.quit(); self.msg("OK", "Serwer SMTP Dzia\u0142a!"); self.log("SMTP test succeeded")
+        except Exception as e: self.log(f"test_smtp_direct error: {traceback.format_exc()}"); self.msg("B\u0142\u0104D", str(e)[:60])
 
     def start_special_send_flow(self, _): self.open_picker("special_send")
 
@@ -764,7 +916,7 @@ class FutureApp(App):
         ti.bind(text=lambda i,v: rf(v)); rf(); btn = ModernButton(text="DALEJ", on_press=lambda x: [p.dismiss(), self.special_send_step_3(path)] if self.selected_emails else None); box.add_widget(btn); p = Popup(title="Odbiorcy", content=box, size_hint=(.95,.9)); p.open()
 
     def special_send_step_3(self, path):
-        b = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)); ti_s = ModernInput(hint_text="Temat"); ti_b = ModernInput(hint_text="Treść", multiline=True); b.add_widget(ti_s); b.add_widget(ti_b)
+        b = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)); ti_s = ModernInput(hint_text="Temat"); ti_b = ModernInput(hint_text="Tre\u015b\u0107", multiline=True); b.add_widget(ti_s); b.add_widget(ti_b)
         def run(_):
             def task():
                 cfg = json.load(open(Path(self.user_data_dir)/"smtp.json")); srv = self.connect_smtp(cfg)
@@ -774,7 +926,7 @@ class FutureApp(App):
                     srv.send_message(msg)
                 srv.quit(); Clock.schedule_once(lambda d: self.msg("OK", "Wysłano")); self.log(f"Special send file {path} to {len(self.selected_emails)} recipients")
             threading.Thread(target=task, daemon=True).start(); p.dismiss()
-        b.add_widget(ModernButton(text="WYŚLIJ PLIK", on_press=run)); p = Popup(title="Wiadomość", content=b, size_hint=(.9, .8)); p.open()
+        b.add_widget(ModernButton(text="WYŚLIJ PLIK", on_press=run)); p = Popup(title="Wiadomo\u015b\u0107", content=b, size_hint=(.9, .8)); p.open()
 
     def filter_table(self, i, v): self.filtered_data = [self.full_data[0]] + [r for r in self.full_data[1:] if any(v.lower() in str(c).lower() for c in r)]; self.refresh_table()
 
@@ -818,11 +970,11 @@ class FutureApp(App):
 
     def setup_tmpl_ui(self):
         self.sc_ref["tmpl"].clear_widgets()
-        l, ti_s, ti_b = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10)), ModernInput(hint_text="Temat {Imię}"), ModernInput(hint_text="Treść...", multiline=True)
+        l, ti_s, ti_b = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10)), ModernInput(hint_text="Temat {Imi\u0119}"), ModernInput(hint_text="Tre\u015b\u0107...", multiline=True)
         ts, tb = self.conn.execute("SELECT val FROM settings WHERE key='t_sub'").fetchone(), self.conn.execute("SELECT val FROM settings WHERE key='t_body'").fetchone()
         ti_s.text, ti_b.text = (ts[0] if ts else ""), (tb[0] if tb else "")
         l.add_widget(Label(text="SZABLON EMAIL", bold=True)); l.add_widget(ti_s); l.add_widget(ti_b)
-        l.add_widget(ModernButton(text="ZAPISZ", on_press=lambda x: [self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_sub',ti_s.text)), self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_body',ti_b.text)), self.conn.commit(), self.msg("OK","Wzór zapisany")]))
+        l.add_widget(ModernButton(text="ZAPISZ", on_press=lambda x: [self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_sub',ti_s.text)), self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_body',ti_b.text)), self.conn.commit(), self.msg("OK","Wz\u00f3r zapisany")]))
         l.add_widget(ModernButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'email'))); self.sc_ref["tmpl"].add_widget(l)
 
     def setup_contacts_ui(self):
@@ -842,9 +994,14 @@ class FutureApp(App):
             with r.canvas.before: Color(*COLOR_CARD); Rectangle(pos=r.pos, size=r.size)
             inf, acts = BoxLayout(orientation="vertical"), BoxLayout(size_hint_x=0.3, orientation="vertical", spacing=dp(4))
             inf.add_widget(Label(text=f"{d[0]} {d[1]}".title(), bold=True, halign="left", text_size=(dp(250),None)))
-            info_text = f"E: {d[2]}\nP: {d[3]}\nT: {d[4] if d[4] else '-'}\nZakład: {d[5] if d[5] else '-'}\nAdres: {d[6] if d[6] else '-'}"
+            info_text = f"E: {d[2]}\nP: {d[3]}\nT: {d[4] if d[4] else '-'}\nAdres: {d[6] if d[6] else '-'}"
             inf.add_widget(Label(text=info_text, font_size='11sp', halign="left", text_size=(dp(250),None), color=(0.7,0.7,0.7,1)))
-            r.add_widget(inf); acts.add_widget(Button(text="Edytuj", on_press=lambda x, data=d: self.form_contact(*data))); acts.add_widget(Button(text="Usuń", background_color=(0.8,0.2,0.2,1), on_press=lambda x, n=d[0], s=d[1]: self.delete_contact(n, s))); r.add_widget(acts); self.c_ls.add_widget(r)
+            r.add_widget(inf)
+            qbox = self.contact_quick_actions(d[4], d[0], d[1])
+            r.add_widget(qbox)
+            acts.add_widget(Button(text="Edytuj", on_press=lambda x, data=d: self.form_contact(*data)))
+            acts.add_widget(Button(text="Usu\u0144", background_color=(0.8,0.2,0.2,1), on_press=lambda x, n=d[0], s=d[1]: self.delete_contact(n, s)))
+            r.add_widget(acts); self.c_ls.add_widget(r)
 
     def msg(self, tit, txt):
         b = BoxLayout(orientation="vertical", padding=dp(20)); b.add_widget(Label(text=txt, halign="center")); b.add_widget(ModernButton(text="OK", on_press=lambda x: p.dismiss(), height=dp(50), size_hint_y=None)); p = Popup(title=tit, content=b, size_hint=(0.85, 0.45)); p.open()
@@ -852,7 +1009,7 @@ class FutureApp(App):
     def update_stats(self, *a):
         try:
             count = self.conn.execute('SELECT count(*) FROM contacts').fetchone()[0]
-            s = f"Baza: {count} | Załączniki: {len(self.global_attachments)}"
+            s = f"Baza: {count} | Za\u0142\u0105czniki: {len(self.global_attachments)}"
             if hasattr(self, 'lbl_stats'):
                 self.lbl_stats.text = s
             if hasattr(self, 'lbl_stats_paski'):
@@ -868,9 +1025,9 @@ class FutureApp(App):
             if hasattr(self, 'pb_paski'):
                 self.pb_paski.value = val
             if hasattr(self, 'pb_label'):
-                self.pb_label.text = f"Postęp: {d}/{self.total_q}"
+                self.pb_label.text = f"Post\u0119p: {d}/{self.total_q}"
             if hasattr(self, 'pb_label_paski'):
-                self.pb_label_paski.text = f"Postęp: {d}/{self.total_q}"
+                self.pb_label_paski.text = f"Post\u0119p: {d}/{self.total_q}"
         except:
             pass
 
@@ -914,13 +1071,18 @@ class FutureApp(App):
         self.style_xlsx(ws); wb.save(p/f"Raport_{nx}_{sx}.xlsx"); self.msg("OK", f"Zapisano PDF dla: {nx}"); self.log(f"Export single row for {nx} {sx}")
 
     def delete_contact(self, n, s):
-        def pr(_): [self.conn.execute("DELETE FROM contacts WHERE name=? AND surname=?", (n, s)), self.conn.commit(), px.dismiss(), self.refresh_contacts_list(), self.update_stats()]
-        px = Popup(title="Usuń?", content=Button(text="USUŃ KONTAKT", on_press=pr, background_color=(1,0,0,1)), size_hint=(0.7,0.3)); px.open()
+        def pr(_):
+            self.conn.execute("DELETE FROM contacts WHERE name=? AND surname=?", (n, s))
+            self.conn.commit()
+            px.dismiss()
+            self.refresh_contacts_list()
+            self.update_stats()
+        px = Popup(title="Usu\u0144?", content=BoxLayout(orientation="vertical", children=[ModernButton(text="USUŃ KONTAKT", on_press=pr, size_hint_y=None, height=dp(50))]), size_hint=(0.7,0.3)); px.open()
 
     def form_contact(self, n="", s="", e="", pes="", ph="", workplace="", apartment=""):
-        b, f_ins = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)), [TextInput(text=str(n), hint_text="Imię"), TextInput(text=str(s), hint_text="Nazwisko"), TextInput(text=str(e), hint_text="Email"), TextInput(text=str(pes), hint_text="PESEL"), TextInput(text=str(ph), hint_text="Telefon")]
+        b, f_ins = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)), [TextInput(text=str(n), hint_text="Imi\u0119"), TextInput(text=str(s), hint_text="Nazwisko"), TextInput(text=str(e), hint_text="Email"), TextInput(text=str(pes), hint_text="PESEL"), TextInput(text=str(ph), hint_text="Telefon")]
         for f in f_ins: b.add_widget(f)
-        workplace_ti = TextInput(hint_text="Zakład pracy (np. Rybnik KWK Jankowice)", size_hint_y=None, height=dp(40), text=str(workplace))
+        workplace_ti = TextInput(hint_text="Zak\u0142ad pracy (np. Rybnik KWK Jankowice)", size_hint_y=None, height=dp(40), text=str(workplace))
         apartment_ti = TextInput(hint_text="Mieszkanie / adres", size_hint_y=None, height=dp(40), text=str(apartment))
         b.add_widget(workplace_ti); b.add_widget(apartment_ti)
         def save(_):
@@ -944,16 +1106,16 @@ class FutureApp(App):
     def setup_cars_ui(self):
         self.sc_ref["cars"].clear_widgets()
         b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
-        b.add_widget(Label(text="Moduł Samochody", bold=True))
-        b.add_widget(Label(text="Placeholder - tu będzie rozwijany moduł Samochody"))
-        b.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home')))
+        b.add_widget(Label(text="Modu\u0142 Samochody", bold=True))
+        b.add_widget(Label(text="Placeholder - tu b\u0119dzie rozwijany modu\u0142 Samochody"))
+        b.add_widget(ModernButton(text="Powr\u00f3t", on_press=lambda x: setattr(self.sm, 'current', 'home')))
         self.sc_ref["cars"].add_widget(b)
 
     def setup_paski_ui(self):
         self.sc_ref["paski"].clear_widgets()
         l = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
         header = BoxLayout(size_hint_y=None, height=dp(40))
-        header.add_widget(Label(text="Moduł Paski", bold=True))
+        header.add_widget(Label(text="Modu\u0142 Paski", bold=True))
         l.add_widget(header)
         ab = BoxLayout(size_hint_y=None, height=dp(45), spacing=dp(10))
         self.cb_paski_auto = CheckBox(size_hint_x=None, width=dp(45))
@@ -961,7 +1123,7 @@ class FutureApp(App):
         self.cb_paski_auto.bind(active=self.on_auto_checkbox_changed)
         ab.add_widget(self.cb_paski_auto); ab.add_widget(Label(text="AUTOMATYCZNA WYSYŁKA", bold=True))
         l.add_widget(ab)
-        self.lbl_stats_paski = Label(text="Baza: 0 | Załączniki: 0", height=dp(30)); l.add_widget(self.lbl_stats_paski)
+        self.lbl_stats_paski = Label(text="Baza: 0 | Za\u0142\u0105czniki: 0", height=dp(30)); l.add_widget(self.lbl_stats_paski)
         self.pb_label_paski = Label(text="Gotowy", height=dp(25)); self.pb_paski = ProgressBar(max=100, height=dp(20)); l.add_widget(self.pb_label_paski); l.add_widget(self.pb_paski)
         l.add_widget(ModernButton(text="Wczytaj arkusz płac", on_press=lambda x: self.open_picker("data"), height=dp(50), size_hint_y=None))
         l.add_widget(ModernButton(text="Podgląd i eksport", on_press=lambda x: [self.refresh_table(), setattr(self.sm, 'current', 'table')] if self.full_data else self.msg("!", "Wczytaj arkusz!"), height=dp(50), size_hint_y=None))
@@ -979,16 +1141,16 @@ class FutureApp(App):
     def setup_pracownicy_ui(self):
         self.sc_ref["pracownicy"].clear_widgets()
         b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
-        b.add_widget(Label(text="Moduł Pracownicy", bold=True))
-        b.add_widget(Label(text="Placeholder - moduł Pracownicy do późniejszego rozwinięcia"))
+        b.add_widget(Label(text="Modu\u0142 Pracownicy", bold=True))
+        b.add_widget(Label(text="Placeholder - modu\u0142 Pracownicy do p\u00f3\u017aniejszego rozwini\u0119cia"))
         b.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home')))
         self.sc_ref["pracownicy"].add_widget(b)
 
     def setup_zaklady_ui(self):
         self.sc_ref["zaklady"].clear_widgets()
         b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
-        b.add_widget(Label(text="Moduł Zakłady", bold=True))
-        b.add_widget(Label(text="Placeholder - moduł Zakłady do późniejszego rozwinięcia"))
+        b.add_widget(Label(text="Modu\u0142 Zakłady", bold=True))
+        b.add_widget(Label(text="Placeholder - modu\u0142 Zakłady do p\u00f3\u017aniejszego rozwini\u0119cia"))
         b.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home')))
         self.sc_ref["zaklady"].add_widget(b)
 
@@ -1024,7 +1186,7 @@ class FutureApp(App):
             p = Popup(title="Logi aplikacji", content=b, size_hint=(.95,.95)); p.open()
         except Exception:
             self.log(f"show_logs error: {traceback.format_exc()}")
-            self.msg("Błąd", "Nie można otworzyć logów")
+            self.msg("B\u0142\u0105d", "Nie można otworzyć logów")
 
 if __name__ == "__main__":
     FutureApp().run()
