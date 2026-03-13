@@ -487,11 +487,12 @@ class FutureApp(App):
         hs = ScrollView(size_hint_y=None, height=dp(56), do_scroll_x=True)
         inner = BoxLayout(size_hint_x=None, height=dp(56))
         inner.bind(minimum_width=inner.setter('width'))
-        btn_w = dp(120)
+        btn_w = dp(160)
         inner.add_widget(Button(text="Rozmiary", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'sizes')))
         inner.add_widget(Button(text="Zamówienia", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'orders')))
         inner.add_widget(Button(text="Status", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'status')))
         inner.add_widget(Button(text="Raporty", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'reports')))
+        inner.add_widget(Button(text="Załaduj bazę testową", size_hint_x=None, width=btn_w, on_press=lambda x: self.load_test_clothes_db()))
         hs.add_widget(inner)
         container.add_widget(hs)
         self.clothes_sm = ScreenManager(transition=SlideTransition())
@@ -1041,6 +1042,34 @@ class FutureApp(App):
         except Exception:
             self.log(f"show_logs error: {traceback.format_exc()}")
             self.msg("Błąd", "Nie można otworzyć logów")
+
+    def load_test_clothes_db(self):
+        try:
+            sample = [
+                ("Jan", "Kowalski", "Zakład A", "M", "L", "M", "L", "42"),
+                ("Anna", "Nowak", "Zakład B", "S", "M", "S", "M", "38"),
+                ("Piotr", "Wiśniewski", "Zakład A", "L", "XL", "L", "XL", "44"),
+                ("Ewa", "Zielińska", "Zakład C", "M", "M", "M", "M", "39"),
+                ("Marek", "Kaczmarek", "Zakład B", "XL", "XL", "XL", "XL", "46")
+            ]
+            for row in sample:
+                self.conn.execute(
+                    "INSERT INTO clothes_sizes (name, surname, plant, shirt, hoodie, pants, jacket, shoes) VALUES (?,?,?,?,?,?,?,?)",
+                    row
+                )
+            self.conn.commit()
+            if hasattr(self, 'clothes_sm'):
+                try:
+                    scr = self.clothes_sm.get_screen('sizes')
+                    if hasattr(scr, 'refresh'):
+                        scr.refresh()
+                except:
+                    pass
+            self.msg("OK", "Baza testowa załadowana")
+            self.log("Loaded test clothes DB")
+        except Exception as e:
+            self.msg("Błąd", str(e)[:120])
+            self.log(f"load_test_clothes_db error: {traceback.format_exc()}")
 
 if __name__ == "__main__":
     FutureApp().run()
