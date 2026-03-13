@@ -99,7 +99,6 @@ class ClothesSizesScreen(Screen):
         root = BoxLayout(orientation='vertical')
         top = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(8), padding=dp(8))
         top.add_widget(Label(text="Rozmiary pracowników", bold=True))
-        top.add_widget(Button(text="Import Excel", size_hint_x=None, width=dp(140), on_press=lambda x: self.open_import()))
         root.add_widget(top)
         sc = ScrollView()
         self.list_layout = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=dp(6))
@@ -155,35 +154,6 @@ class ClothesSizesScreen(Screen):
             self.refresh()
         box.add_widget(Button(text="ZAPISZ", size_hint_y=None, height=dp(44), on_press=save))
         popup = Popup(title="Edycja",content=box,size_hint=(0.9,0.9))
-        popup.open()
-
-    def open_import(self):
-        def pick_file(_):
-            popup.dismiss()
-            self.show_input_for_import()
-        box = BoxLayout(orientation='vertical')
-        box.add_widget(Label(text="Kliknij aby podać nazwę pliku Excel w katalogu aplikacji"))
-        box.add_widget(Button(text="OK", on_press=pick_file))
-        popup = Popup(title="Import", content=box, size_hint=(0.8,0.3))
-        popup.open()
-
-    def show_input_for_import(self):
-        box = BoxLayout(orientation='vertical', spacing=dp(6))
-        ti = TextInput(hint_text="nazwa pliku (np. rozmiary.xlsx)")
-        box.add_widget(ti)
-        def run(_):
-            name = ti.text.strip()
-            if not name: return
-            path = Path(App.get_running_app().user_data_dir)/name
-            if path.exists():
-                import_clothes_excel(path)
-                popup.dismiss()
-                self.refresh()
-                App.get_running_app().log(f"Imported clothes excel: {path}")
-            else:
-                App.get_running_app().msg("Błąd", "Plik nie istnieje w katalogu aplikacji")
-        box.add_widget(Button(text="IMPORT", on_press=run))
-        popup = Popup(title="Import Excel", content=box, size_hint=(0.9,0.4))
         popup.open()
 
 class ClothesOrdersScreen(Screen):
@@ -492,7 +462,6 @@ class FutureApp(App):
         inner.add_widget(Button(text="Zamówienia", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'orders')))
         inner.add_widget(Button(text="Status", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'status')))
         inner.add_widget(Button(text="Raporty", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'reports')))
-        inner.add_widget(Button(text="Załaduj bazę testową", size_hint_x=None, width=btn_w, on_press=lambda x: self.load_test_clothes_db()))
         hs.add_widget(inner)
         container.add_widget(hs)
         self.clothes_sm = ScreenManager(transition=SlideTransition())
@@ -626,13 +595,6 @@ class FutureApp(App):
                 if iE == -1 and ("@" in v or "mail" in v): iE = i
                 if iP == -1 and "pesel" in v: iP = i
                 if iPhone == -1 and any(x in v for x in ["tel", "phone", "telefon"]): iPhone = i
-            car_keys = ["rej", "rejestr", "plate", "nr rejestr", "nr rej", "vin", "marka", "model", "brand", "car", "samoch"]
-            clothes_keys = ["ubran", "odziez", "rozmiar", "size", "typ", "kolor", "clothe", "garment"]
-            car_cols = []
-            clothes_cols = []
-            for i, v in enumerate(h_low):
-                if any(k in v for k in car_keys): car_cols.append((i, headers[i]))
-                if any(k in v for k in clothes_keys): clothes_cols.append((i, headers[i]))
             if iE != -1:
                 for r in raw[1:]:
                     try:
@@ -645,34 +607,34 @@ class FutureApp(App):
                             self.conn.execute("INSERT OR REPLACE INTO contacts VALUES (?,?,?,?,?)", (str(n).lower(), str(s).lower(), str(e).strip(), str(p) if p is not None else "", str(ph) if ph is not None else ""))
                     except:
                         pass
-            if car_cols:
-                table_cols = ["id INTEGER PRIMARY KEY AUTOINCREMENT"] + [f"'{self._sanitize_col(c[1])}' TEXT" for c in car_cols]
-                self.conn.execute("CREATE TABLE IF NOT EXISTS cars (" + ",".join(table_cols) + ")")
-                insert_cols = [self._sanitize_col(c[1]) for c in car_cols]
-                q = "INSERT INTO cars (" + ",".join([f"'{c}'" for c in insert_cols]) + ") VALUES (" + ",".join(["?"] * len(insert_cols)) + ")"
+            iN_cl = iS_cl = iPlant = iShirt = iHoodie = iPants = iJacket = iShoes = -1
+            for i, v in enumerate(h_low):
+                if iN_cl == -1 and any(k in v for k in ['imi', 'imie', 'name']): iN_cl = i
+                if iS_cl == -1 and any(k in v for k in ['naz', 'nazw', 'surname']): iS_cl = i
+                if iPlant == -1 and any(k in v for k in ['zak', 'zaklad', 'plant']): iPlant = i
+                if iShirt == -1 and any(k in v for k in ['kosz', 'shirt']): iShirt = i
+                if iHoodie == -1 and any(k in v for k in ['bluz', 'hoodie', 'hood']): iHoodie = i
+                if iPants == -1 and any(k in v for k in ['spod', 'pants', 'trous']): iPants = i
+                if iJacket == -1 and any(k in v for k in ['kurt', 'jacket']): iJacket = i
+                if iShoes == -1 and any(k in v for k in ['but', 'shoe']): iShoes = i
+            if iN_cl != -1 and iS_cl != -1 and (iShirt != -1 or iHoodie != -1 or iPants != -1 or iJacket != -1 or iShoes != -1):
                 for r in raw[1:]:
-                    vals = []
-                    for idx, _ in car_cols:
-                        vals.append(str(r[idx]) if idx < len(r) and r[idx] is not None else "")
-                    if any(v.strip() for v in vals):
-                        try:
-                            self.conn.execute(q, vals)
-                        except:
-                            pass
-            if clothes_cols:
-                table_cols = ["id INTEGER PRIMARY KEY AUTOINCREMENT"] + [f"'{self._sanitize_col(c[1])}' TEXT" for c in clothes_cols]
-                self.conn.execute("CREATE TABLE IF NOT EXISTS clothes (" + ",".join(table_cols) + ")")
-                insert_cols = [self._sanitize_col(c[1]) for c in clothes_cols]
-                q = "INSERT INTO clothes (" + ",".join([f"'{c}'" for c in insert_cols]) + ") VALUES (" + ",".join(["?"] * len(insert_cols)) + ")"
-                for r in raw[1:]:
-                    vals = []
-                    for idx, _ in clothes_cols:
-                        vals.append(str(r[idx]) if idx < len(r) and r[idx] is not None else "")
-                    if any(v.strip() for v in vals):
-                        try:
-                            self.conn.execute(q, vals)
-                        except:
-                            pass
+                    try:
+                        n = r[iN_cl] if iN_cl < len(r) and r[iN_cl] is not None else ""
+                        s = r[iS_cl] if iS_cl < len(r) and r[iS_cl] is not None else ""
+                        plant = r[iPlant] if iPlant != -1 and iPlant < len(r) and r[iPlant] is not None else ""
+                        shirt = r[iShirt] if iShirt != -1 and iShirt < len(r) and r[iShirt] is not None else ""
+                        hoodie = r[iHoodie] if iHoodie != -1 and iHoodie < len(r) and r[iHoodie] is not None else ""
+                        pants = r[iPants] if iPants != -1 and iPants < len(r) and r[iPants] is not None else ""
+                        jacket = r[iJacket] if iJacket != -1 and iJacket < len(r) and r[iJacket] is not None else ""
+                        shoes = r[iShoes] if iShoes != -1 and iShoes < len(r) and r[iShoes] is not None else ""
+                        self.conn.execute(
+                            "INSERT INTO clothes_sizes (name, surname, plant, shirt, hoodie, pants, jacket, shoes) VALUES (?,?,?,?,?,?,?,?)",
+                            (str(n).strip(), str(s).strip(), str(plant).strip(), str(shirt).strip(), str(hoodie).strip(), str(pants).strip(), str(jacket).strip(), str(shoes).strip())
+                        )
+                    except:
+                        pass
+                self.conn.commit()
             self.conn.commit()
             new_ver = self._increment_db_version()
             self.update_stats()
@@ -1042,34 +1004,6 @@ class FutureApp(App):
         except Exception:
             self.log(f"show_logs error: {traceback.format_exc()}")
             self.msg("Błąd", "Nie można otworzyć logów")
-
-    def load_test_clothes_db(self):
-        try:
-            sample = [
-                ("Jan", "Kowalski", "Zakład A", "M", "L", "M", "L", "42"),
-                ("Anna", "Nowak", "Zakład B", "S", "M", "S", "M", "38"),
-                ("Piotr", "Wiśniewski", "Zakład A", "L", "XL", "L", "XL", "44"),
-                ("Ewa", "Zielińska", "Zakład C", "M", "M", "M", "M", "39"),
-                ("Marek", "Kaczmarek", "Zakład B", "XL", "XL", "XL", "XL", "46")
-            ]
-            for row in sample:
-                self.conn.execute(
-                    "INSERT INTO clothes_sizes (name, surname, plant, shirt, hoodie, pants, jacket, shoes) VALUES (?,?,?,?,?,?,?,?)",
-                    row
-                )
-            self.conn.commit()
-            if hasattr(self, 'clothes_sm'):
-                try:
-                    scr = self.clothes_sm.get_screen('sizes')
-                    if hasattr(scr, 'refresh'):
-                        scr.refresh()
-                except:
-                    pass
-            self.msg("OK", "Baza testowa załadowana")
-            self.log("Loaded test clothes DB")
-        except Exception as e:
-            self.msg("Błąd", str(e)[:120])
-            self.log(f"load_test_clothes_db error: {traceback.format_exc()}")
 
 if __name__ == "__main__":
     FutureApp().run()
