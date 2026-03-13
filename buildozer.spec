@@ -1,105 +1,59 @@
 [app]
-
 # (str) Title of your application
-title = Future Ultimate
+title = Future 10.1 ULTIMATE
 
 # (str) Package name
-package.name = futureultimate
+package.name = futureultipro
 
-# (str) Package domain (needed for android/ios packaging)
-package.domain = com.yourcompany
+# (str) Package domain (needed for android packaging)
+package.domain = org.future.hr
 
+# (str) Source code where the main.py live
 source.dir = .
 
+# (list) Source files to include (let empty to include all the files)
+source.include_exts = py,png,jpg,kv,atlas,json
+
 # (str) Application versioning (method 1)
-version = 20.0
-
-# (list) Source files to include (let empty to include all the files
-# in the current directory)
-source.include_exts = py,png,jpg,kv,atlas
-
-# (list) List of modules to be included (blacklist - usually empty)
-# modules =
+version = 10.1
 
 # (list) Application requirements
-# comma separated e.g. requirements = sqlite3,kivy
-requirements = python3,kivy==2.2.1,openpyxl,xlrd,requests,pandas,jnius,android
+# UWAGA: Dodano jdcal i et_xmlfile - są niezbędne dla stabilności openpyxl!
+requirements = python3, kivy==2.3.0, openpyxl, jdcal, et_xmlfile, jnius, android, sqlite3, requests, urllib3, xlrd, openssl
 
-# (str) Kivy version if target is Android
-# This is automatically picked up from `requirements` now.
-# kivy.version = 2.2.1
-
-# (str) Presplash file.
-# presplash.filename = %(source.dir)s/data/presplash.png
-
-# (str) Icon file.
-# icon.filename = %(source.dir)s/data/icon.png
-
-# (list) Permissions
-# (https://developer.android.com/reference/android/Manifest.permission.html)
-android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
-
-# (int) Android API level to use
-android.api = 33
-
-# (int) Minimum API level for Android
-android.minapi = 21
-
-# (str) Android NDK version
-android.ndk = 25b
-
-# (str) Android SDK version (if not specified, the latest available is used)
-# android.sdk = 26
-
-# (str) Python version to use for Android build
-android.python_version = 3.9
-
-# (bool) Enable or disable Android debugging
-android.debug = 1
-
-# (bool) If set to 1, will compile your application with the
-# Python 3 bootstrap.
-android.enable_python3 = 1
-
-# (list) Android device architectures to build for
-# Default is armeabi-v7a.
-# android.arch = arm64-v8a
-
-# (list) Java libraries to include in the build
-# android.add_libs_armeabi-v7a =
-
-# (list) Java classes to include in the build
-# android.add_classes_armeabi-v7a =
-
-# (list) Libraries to include in the build
-# android.add_libraries =
-
-# (bool) If set to 1, will enable the use of the Android support library
-# android.enable_multidex = 1
-
-# (str) The default value for the orientation of the screen. Can be one of
-# 'landscape', 'portrait', 'sensor'.
+# (str) Supported orientations
 orientation = portrait
 
-# (bool) If set to 1, will force the application to be fullscreen
-fullscreen = 1
+# (bool) Indicate if the application should be fullscreen or not
+fullscreen = 0
 
-# (str) The name of the main application file (usually main.py)
-main.py = main.py
+# (list) Permissions
+android.permissions = READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, INTERNET
 
-#
-# Python for android (p4a) configuration
-#
+# (int) Target Android API, should be as high as possible.
+android.api = 33
+
+# (int) Minimum API your APK will support.
+android.minapi = 21
+
+# (str) Android NDK version to use
+android.ndk = 25b
+
+# (list) The Android architectures to build for
+android.archs = armeabi-v7a, arm64-v8a
+
+# (bool) enables Android auto backup feature (Android API >= 23)
+android.allow_backup = True
+
+# (str) Path to a custom manifest template
+# android.manifest_template = manifest.tmpl
+
+# (list) Android additionnal libraries to copy into libs/armeabi
+# android.add_libs_armeabi = lib/armeabi/libgnustl_shared.so
+
 [buildozer]
-
-# (int) Log level (0 = error, 1 = warning, 2 = info, 3 = debug)
+# (int) Log level (0 = error only, 1 = info, 2 = debug (with command output))
 log_level = 2
 
-# (str) The directory where buildozer stores all the build stuff
-build_dir = .buildozer
-
-# (str) The directory where buildozer stores all the distributions
-dist_dir = .dist
-
-# (list) List of targets to build
-# target = android debug
+# (int) Display warning if buildozer is run as root (0 = NO, 1 = YES)
+warn_on_root = 1
