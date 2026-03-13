@@ -99,6 +99,7 @@ class ClothesSizesScreen(Screen):
         root = BoxLayout(orientation='vertical')
         top = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(8), padding=dp(8))
         top.add_widget(Label(text="Rozmiary pracowników", bold=True))
+        top.add_widget(ModernButton(text="Wróć", size_hint_x=None, width=dp(120), on_press=lambda x: setattr(App.get_running_app().sm, 'current', 'clothes')))
         root.add_widget(top)
         sc = ScrollView()
         self.list_layout = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=dp(6))
@@ -297,23 +298,6 @@ class ClothesReportsScreen(Screen):
         App.get_running_app().msg("OK", f"Zapisano: {path.name}")
         db.log(f"Generated clothes report: {path}")
 
-def import_clothes_excel(path):
-    if load_workbook is None:
-        return
-    db = App.get_running_app()
-    wb = load_workbook(path)
-    ws = wb.active
-    for r in ws.iter_rows(min_row=2,values_only=True):
-        vals = tuple("" if v is None else str(v) for v in r[:8])
-        if len(vals) < 8:
-            vals = vals + tuple("" for _ in range(8 - len(vals)))
-        db.conn.execute("""
-        INSERT INTO clothes_sizes
-        (name,surname,plant,shirt,hoodie,pants,jacket,shoes)
-        VALUES (?,?,?,?,?,?,?,?)
-        """,vals)
-    db.conn.commit()
-
 class FutureApp(App):
     def build(self):
         Window.clearcolor = COLOR_BG
@@ -462,6 +446,7 @@ class FutureApp(App):
         inner.add_widget(Button(text="Zamówienia", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'orders')))
         inner.add_widget(Button(text="Status", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'status')))
         inner.add_widget(Button(text="Raporty", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'reports')))
+        inner.add_widget(ModernButton(text="Wróć", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.sm, 'current', 'home')))
         hs.add_widget(inner)
         container.add_widget(hs)
         self.clothes_sm = ScreenManager(transition=SlideTransition())
