@@ -43,6 +43,25 @@ try:
 except:
     canvas = None
 
+try:
+    import pandas as pd
+except Exception:
+    pd = None
+
+from collections import defaultdict
+
+try:
+    from reportlab.platypus import SimpleDocTemplate, Table, Paragraph, Spacer
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+except Exception:
+    SimpleDocTemplate = None
+    Table = None
+    Paragraph = None
+    Spacer = None
+    A4 = None
+    getSampleStyleSheet = None
+
 COLOR_PRIMARY = (0.1, 0.5, 0.9, 1)
 COLOR_BG = (0.05, 0.07, 0.1, 1)
 COLOR_CARD = (0.12, 0.15, 0.2, 1)
@@ -139,17 +158,7 @@ class ClothesSizesScreen(Screen):
             UPDATE clothes_sizes
             SET name=?,surname=?,plant=?,shirt=?,hoodie=?,pants=?,jacket=?,shoes=?
             WHERE id=?
-            """,(
-                fields[0].text,
-                fields[1].text,
-                fields[2].text,
-                fields[3].text,
-                fields[4].text,
-                fields[5].text,
-                fields[6].text,
-                fields[7].text,
-                row[0]
-            ))
+            """,(fields[0].text,fields[1].text,fields[2].text,fields[3].text,fields[4].text,fields[5].text,fields[6].text,fields[7].text,row[0]))
             App.get_running_app().conn.commit()
             popup.dismiss()
             self.refresh()
@@ -203,6 +212,9 @@ class ClothesOrdersScreen(Screen):
                 size_hint_x=0.2,
                 on_press=lambda x,i=r[0]:self.change(i)
             ))
+            box.add_widget(Button(text="PDF", size_hint_x=0.15, on_press=lambda x,i=r[0]: App.get_running_app().clothes_order_pdf(i)))
+            box.add_widget(Button(text="WYDAJ", size_hint_x=0.15, on_press=lambda x,i=r[0]: App.get_running_app().clothes_issue_all(i)))
+            box.add_widget(Button(text="CZ\u0118\u015aCIOWE", size_hint_x=0.2, on_press=lambda x,i=r[0]: App.get_running_app().clothes_issue_partial(i)))
             self.list_layout.add_widget(box)
 
     def change(self,id):
@@ -394,7 +406,7 @@ class FutureApp(App):
             intent.setData(Uri.parse("tel:"+phone))
             PythonActivity.mActivity.startActivity(intent)
         except Exception as e:
-            self.msg("Błąd", str(e))
+            self.msg("B\u0142\u0105d", str(e))
 
     def whatsapp_contact(self, phone):
         if not phone:
@@ -413,7 +425,7 @@ class FutureApp(App):
             intent.setData(Uri.parse(url))
             PythonActivity.mActivity.startActivity(intent)
         except Exception as e:
-            self.msg("Błąd", str(e))
+            self.msg("B\u0142\u0105d", str(e))
 
     def open_clothes_panel(self, name, surname):
         root = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(10))
@@ -428,7 +440,7 @@ class FutureApp(App):
             height=dp(40)
         )
         size_shoes = TextInput(
-            hint_text="Rozmiar butów",
+            hint_text="Rozmiar but\u00f3w",
             size_hint_y=None,
             height=dp(40)
         )
@@ -476,15 +488,15 @@ class FutureApp(App):
     def contact_quick_actions(self, phone, name, surname):
         box = BoxLayout(size_hint_x=0.15, orientation="vertical", spacing=dp(4))
         box.add_widget(Button(
-            text="📞",
+            text="\ud83d\udcde",
             on_press=lambda x: self.call_contact(phone)
         ))
         box.add_widget(Button(
-            text="💬",
+            text="\ud83d\udcac",
             on_press=lambda x: self.whatsapp_contact(phone)
         ))
         box.add_widget(Button(
-            text="👕",
+            text="\ud83d\udc55",
             on_press=lambda x: self.open_clothes_panel(name,surname)
         ))
         return box
@@ -494,7 +506,7 @@ class FutureApp(App):
             f"E: {email}\n"
             f"P: {pesel}\n"
             f"T: {phone}\n"
-            f"📅 Zatrudniony: {hire_date}"
+            f"\ud83d\udcc5 Zatrudniony: {hire_date}"
         )
 
     def init_db(self):
@@ -556,6 +568,346 @@ class FutureApp(App):
             self.patch_contacts_database()
         except:
             pass
+        try:
+            self.clothes_init()
+        except:
+            pass
+
+    def clothes_init(self):
+        c=self.conn.cursor()
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS workers(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        surname TEXT,
+        plant TEXT
+        )
+        """)
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS worker_sizes(
+        worker_id INTEGER,
+        shirt TEXT,
+        pants TEXT,
+        shoes TEXT,
+        jacket TEXT
+        )
+        """)
+        self.conn.commit()
+
+    def clothes_import_excel(self,path):
+        if pd is None:
+            self.msg("Błąd","Brak biblioteki pandas - import niemożliwy")
+            return
+        df=pd.read_excel(path)
+        col_map = {str(col).lower(): col for col in df.columns}
+        name_col = None
+        surname_col = None
+        plant_col = None
+        for key in col_map:
+            if "imi" in key or "name" in key:
+                name_col = col_map[key]
+            if "naz" in key or "surname" in key:
+                surname_col = col_map[key]
+            if "zak" in key or "plant" in key:
+                plant_col = col_map[key]
+        if not name_col or not surname_col:
+            self.msg("Błąd","Nie znaleziono kolumn imię/nazwisko")
+            return
+        c=self.conn.cursor()
+        for _,row in df.iterrows():
+            name=row[name_col]
+            surname=row[surname_col]
+            plant=row[plant_col] if plant_col else ""
+            try:
+                c.execute("""
+                INSERT INTO workers(name,surname,plant)
+                VALUES(?,?,?)
+                """,(str(name).strip(),str(surname).strip(),str(plant).strip()))
+            except:
+                pass
+        self.conn.commit()
+        self.msg("OK","Import zakończony")
+
+    def clothes_edit_sizes(self,worker_id):
+        root=BoxLayout(orientation="vertical",padding=dp(10),spacing=dp(6))
+        shirt=TextInput(hint_text="Koszulka")
+        pants=TextInput(hint_text="Spodnie")
+        shoes=TextInput(hint_text="Buty")
+        jacket=TextInput(hint_text="Kurtka")
+        root.add_widget(shirt)
+        root.add_widget(pants)
+        root.add_widget(shoes)
+        root.add_widget(jacket)
+        def save(_):
+            try:
+                self.conn.execute("DELETE FROM worker_sizes WHERE worker_id=?",(worker_id,))
+            except:
+                pass
+            self.conn.execute("""
+            INSERT INTO worker_sizes
+            VALUES(?,?,?,?,?)
+            """,(worker_id,shirt.text,pants.text,shoes.text,jacket.text))
+            self.conn.commit()
+            self.msg("OK","Rozmiary zapisane")
+            px.dismiss()
+        root.add_widget(Button(text="ZAPISZ",on_press=save))
+        px = Popup(title="ROZMIARY",content=root,size_hint=(0.8,0.8))
+        px.open()
+
+    def clothes_select_workers(self):
+        root=BoxLayout(orientation="vertical",padding=dp(10),spacing=dp(6))
+        plant_filter=TextInput(hint_text="Zakład")
+        root.add_widget(plant_filter)
+        cur=self.conn.cursor()
+        workers=[]
+        grid=GridLayout(cols=1,size_hint_y=None)
+        grid.bind(minimum_height=grid.setter("height"))
+        rows=cur.execute("""
+        SELECT id,name,surname,plant
+        FROM workers
+        ORDER BY surname
+        """).fetchall()
+        for r in rows:
+            wid=r[0]
+            label=f"{r[1]} {r[2]} ({r[3]})"
+            cb=CheckBox()
+            row=BoxLayout(size_hint_y=None,height=dp(30))
+            row.add_widget(Label(text=label))
+            row.add_widget(cb)
+            grid.add_widget(row)
+            workers.append((wid,r[3],cb))
+        scroll=ScrollView()
+        scroll.add_widget(grid)
+        root.add_widget(scroll)
+        def select_plant(_):
+            plant=plant_filter.text
+            for wid,p,cb in workers:
+                cb.active=(p==plant)
+        root.add_widget(Button(text="WYBIERZ ZAKŁAD",on_press=select_plant))
+        Popup(title="WYBÓR PRACOWNIKÓW",content=root,size_hint=(0.9,0.9)).open()
+
+    def clothes_create_order(self,worker_ids,items,plant):
+        c=self.conn.cursor()
+        c.execute("""
+        INSERT INTO clothes_orders(plant,status,date)
+        VALUES(?,?,?)
+        """,(plant,"nowe",datetime.now().strftime("%Y-%m-%d")))
+        order_id=c.lastrowid
+        for wid in worker_ids:
+            for item in items:
+                c.execute("""
+                INSERT INTO clothes_order_items(order_id,worker_id,item)
+                VALUES(?,?,?)
+                """,(order_id,wid,item))
+        self.conn.commit()
+        self.msg("OK","Zamówienie utworzone")
+
+    def clothes_count_sizes(self,order_id):
+        cur=self.conn.cursor()
+        rows=cur.execute("""
+        SELECT worker_id,item
+        FROM clothes_order_items
+        WHERE order_id=?
+        """,(order_id,)).fetchall()
+        summary=defaultdict(int)
+        for wid,item in rows:
+            size=cur.execute("""
+            SELECT shirt,pants,shoes,jacket
+            FROM worker_sizes
+            WHERE worker_id=?
+            """,(wid,)).fetchone()
+            if not size:
+                continue
+            if item=="koszulka":
+                s=size[0]
+            elif item=="spodnie":
+                s=size[1]
+            elif item=="buty":
+                s=size[2]
+            else:
+                s=size[3]
+            summary[f"{item} {s}"]+=1
+        return summary
+
+    def clothes_order_pdf(self,order_id):
+        if SimpleDocTemplate is None:
+            self.msg("PDF","Brak reportlab.platypus - PDF niedostępny")
+            return
+        summary=self.clothes_count_sizes(order_id)
+        styles=getSampleStyleSheet()
+        elements=[]
+        elements.append(Paragraph("ZAMÓWIENIE UBRAŃ",styles['Title']))
+        elements.append(Spacer(1,20))
+        data=[["Pozycja","Ilość"]]
+        for k,v in summary.items():
+            data.append([k,v])
+        pdf=SimpleDocTemplate(f"zamowienie_{order_id}.pdf",pagesize=A4)
+        pdf.build(elements+[Table(data)])
+        self.msg("PDF","PDF zamówienia zapisany")
+
+    def clothes_issue_pdf(self,order_id):
+        if SimpleDocTemplate is None:
+            self.msg("PDF","Brak reportlab.platypus - PDF niedostępny")
+            return
+        cur=self.conn.cursor()
+        rows=cur.execute("""
+        SELECT w.name,w.surname,c.item
+        FROM clothes_order_items c
+        JOIN workers w ON w.id=c.worker_id
+        WHERE order_id=?
+        """,(order_id,)).fetchall()
+        styles=getSampleStyleSheet()
+        elements=[]
+        elements.append(Paragraph("LISTA WYDANIA UBRAŃ",styles['Title']))
+        elements.append(Spacer(1,20))
+        data=[["Pracownik","Ubranie","Podpis"]]
+        for r in rows:
+            data.append([f"{r[0]} {r[1]}",r[2],""])
+        pdf=SimpleDocTemplate(f"wydanie_{order_id}.pdf",pagesize=A4)
+        pdf.build(elements+[Table(data)])
+        self.msg("PDF","PDF wydania zapisany")
+
+    def clothes_issue_all(self,order_id):
+        cur=self.conn.cursor()
+        rows=cur.execute("""
+        SELECT worker_id,item
+        FROM clothes_order_items
+        WHERE order_id=?
+        """,(order_id,)).fetchall()
+        for r in rows:
+            cur.execute("""
+            INSERT INTO clothes_history(worker_id,item,date)
+            VALUES(?,?,?)
+            """,(r[0],r[1],datetime.now().strftime("%Y-%m-%d")))
+        cur.execute("DELETE FROM clothes_order_items WHERE order_id=?",(order_id,))
+        cur.execute("UPDATE clothes_orders SET status='wydane' WHERE id=?",(order_id,))
+        self.conn.commit()
+        self.msg("OK","Ubrania wydane")
+
+    def clothes_issue_partial(self,order_id):
+        root=BoxLayout(orientation="vertical",padding=dp(10),spacing=dp(6))
+        cur=self.conn.cursor()
+        grid=GridLayout(cols=1,size_hint_y=None)
+        grid.bind(minimum_height=grid.setter("height"))
+        items=[]
+        rows=cur.execute("""
+        SELECT c.id,w.name,w.surname,c.item
+        FROM clothes_order_items c
+        JOIN workers w ON w.id=c.worker_id
+        WHERE order_id=?
+        """,(order_id,)).fetchall()
+        for r in rows:
+            cid=r[0]
+            label=f"{r[1]} {r[2]} - {r[3]}"
+            cb=CheckBox()
+            row=BoxLayout(size_hint_y=None,height=dp(30))
+            row.add_widget(Label(text=label))
+            row.add_widget(cb)
+            grid.add_widget(row)
+            items.append((cid,cb))
+        scroll=ScrollView()
+        scroll.add_widget(grid)
+        root.add_widget(scroll)
+        def save(_):
+            for cid,cb in items:
+                if cb.active:
+                    cur.execute("""
+                    INSERT INTO clothes_history
+                    SELECT worker_id,item,?
+                    FROM clothes_order_items
+                    WHERE id=?
+                    """,(datetime.now().strftime("%Y-%m-%d"),cid))
+                    cur.execute("DELETE FROM clothes_order_items WHERE id=?",(cid,))
+            self.conn.commit()
+            self.msg("OK","Wydanie zapisane")
+            px.dismiss()
+        root.add_widget(Button(text="ZAPISZ",on_press=save))
+        px = Popup(title="WYDANIE CZĘŚCIOWE",content=root,size_hint=(0.9,0.9))
+        px.open()
+
+    def clothes_worker_year_stats(self,worker_id,year=None):
+        if not year:
+            year=datetime.now().year
+        root=BoxLayout(orientation="vertical",padding=dp(10),spacing=dp(6))
+        cur=self.conn.cursor()
+        worker=cur.execute("""
+        SELECT name,surname,plant
+        FROM workers
+        WHERE id=?
+        """,(worker_id,)).fetchone()
+        root.add_widget(Label(
+            text=f"{worker[0]} {worker[1]} ({worker[2]}) - {year}",
+            size_hint_y=None,
+            height=dp(50)
+        ))
+        clothes=["koszulka","spodnie","buty","kurtka"]
+        grid=GridLayout(cols=1,size_hint_y=None)
+        grid.bind(minimum_height=grid.setter("height"))
+        for item in clothes:
+            count=cur.execute("""
+            SELECT COUNT(*)
+            FROM clothes_history
+            WHERE worker_id=? AND item=? AND strftime('%Y',date)=?
+            """,(worker_id,item,str(year))).fetchone()[0]
+            last=cur.execute("""
+            SELECT date
+            FROM clothes_history
+            WHERE worker_id=? AND item=?
+            ORDER BY date DESC
+            LIMIT 1
+            """,(worker_id,item)).fetchone()
+            last_date=last[0] if last else "-"
+            row=BoxLayout(size_hint_y=None,height=dp(40))
+            row.add_widget(Label(
+                text=f"{item}   w {year}: {count}   ostatnie: {last_date}"
+            ))
+            grid.add_widget(row)
+        scroll=ScrollView()
+        scroll.add_widget(grid)
+        root.add_widget(scroll)
+        Popup(
+            title="Statystyki ubrań",
+            content=root,
+            size_hint=(0.85,0.85)
+        ).open()
+
+    def clothes_stats_panel(self):
+        root=BoxLayout(orientation="vertical",padding=dp(10),spacing=dp(6))
+        year_input=TextInput(
+            text=str(datetime.now().year),
+            hint_text="Rok",
+            size_hint_y=None,
+            height=dp(40)
+        )
+        root.add_widget(year_input)
+        grid=GridLayout(cols=1,size_hint_y=None)
+        grid.bind(minimum_height=grid.setter("height"))
+        cur=self.conn.cursor()
+        rows=cur.execute("""
+        SELECT id,name,surname,plant
+        FROM workers
+        ORDER BY surname
+        """).fetchall()
+        for r in rows:
+            wid=r[0]
+            btn=Button(
+                text=f"{r[1]} {r[2]} ({r[3]})",
+                size_hint_y=None,
+                height=dp(40),
+                on_press=lambda x,wid=wid:self.clothes_worker_year_stats(
+                    wid,
+                    int(year_input.text)
+                )
+            )
+            grid.add_widget(btn)
+        scroll=ScrollView()
+        scroll.add_widget(grid)
+        root.add_widget(scroll)
+        Popup(
+            title="Statystyki roczne ubrań",
+            content=root,
+            size_hint=(0.9,0.9)
+        ).open()
 
     def add_screens(self):
         names = ["home", "table", "email", "smtp", "tmpl", "contacts", "report", "cars", "clothes", "paski", "pracownicy", "zaklady", "settings"]
@@ -592,9 +944,9 @@ class FutureApp(App):
         grid.add_widget(ModernButton(text="Ubranie robocze", on_press=lambda x: setattr(self.sm, 'current', 'clothes'), **btn_props))
         grid.add_widget(ModernButton(text="Paski", on_press=lambda x: setattr(self.sm, 'current', 'paski'), **btn_props))
         grid.add_widget(ModernButton(text="Pracownicy", on_press=lambda x: setattr(self.sm, 'current', 'pracownicy'), **btn_props))
-        grid.add_widget(ModernButton(text="Zak\u0142ady", on_press=lambda x: setattr(self.sm, 'current', 'zaklady'), **btn_props))
+        grid.add_widget(ModernButton(text="Zakłady", on_press=lambda x: setattr(self.sm, 'current', 'zaklady'), **btn_props))
         grid.add_widget(ModernButton(text="Ustawienia", on_press=lambda x: setattr(self.sm, 'current', 'settings'), **btn_props))
-        grid.add_widget(ModernButton(text="Wyj\u015bcie", on_press=lambda x: App.get_running_app().stop(), bg_color=(0.6,0.1,0.1,1), **btn_props))
+        grid.add_widget(ModernButton(text="Wyjście", on_press=lambda x: App.get_running_app().stop(), bg_color=(0.6,0.1,0.1,1), **btn_props))
         sv.add_widget(grid)
         root.add_widget(sv)
         self.sc_ref["home"].add_widget(root)
@@ -610,10 +962,10 @@ class FutureApp(App):
         inner.bind(minimum_width=inner.setter('width'))
         btn_w = dp(160)
         inner.add_widget(Button(text="Rozmiary", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'sizes')))
-        inner.add_widget(Button(text="Zam\u00f3wienia", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'orders')))
+        inner.add_widget(Button(text="Zamówienia", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'orders')))
         inner.add_widget(Button(text="Status", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'status')))
         inner.add_widget(Button(text="Raporty", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'reports')))
-        inner.add_widget(ModernButton(text="Wr\u00f3\u0107", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.sm, 'current', 'home')))
+        inner.add_widget(ModernButton(text="Wróć", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.sm, 'current', 'home')))
         hs.add_widget(inner)
         container.add_widget(hs)
         self.clothes_sm = ScreenManager(transition=SlideTransition())
@@ -705,7 +1057,7 @@ class FutureApp(App):
             cfg_p = Path(self.user_data_dir)/"smtp.json"
             if not cfg_p.exists(): return Clock.schedule_once(lambda d: self.msg("!", "Brak SMTP"))
             cfg = json.load(open(cfg_p)); srv = self.connect_smtp(cfg)
-            if self.send_single_email(srv, cfg, row, res[0]): Clock.schedule_once(lambda d: self.msg("OK", f"Wys\u0142ano do: {name}"))
+            if self.send_single_email(srv, cfg, row, res[0]): Clock.schedule_once(lambda d: self.msg("OK", f"Wysłano do: {name}"))
             srv.quit()
         threading.Thread(target=task, daemon=True).start()
 
@@ -736,7 +1088,7 @@ class FutureApp(App):
         try:
             wb = load_workbook(path, data_only=True); ws = wb.active; raw = list(ws.iter_rows(values_only=True))
             if not raw or not raw[0]:
-                self.msg("B\u0142\u0105d", "Pusty plik")
+                self.msg("Błąd", "Pusty plik")
                 return
             headers = ["" if v is None else str(v).strip() for v in raw[0]]
             h_low = [h.lower() for h in headers]
@@ -794,11 +1146,11 @@ class FutureApp(App):
                 clothes_count = 0
             new_ver = self._increment_db_version()
             self.update_stats()
-            self.msg("OK", f"Baza ubra\u0144 zaktualizowana. Rekordy ubra\u0144: {clothes_count}\nDane ubra\u0144 dost\u0119pne w module 'Ubranie robocze'.")
+            self.msg("OK", f"Baza ubrań zaktualizowana. Rekordy ubrań: {clothes_count}\nDane ubrań dostępne w module 'Ubranie robocze'.")
             self.log(f"Imported book: {path} | clothes={clothes_count}")
         except Exception as e:
             self.log(f"process_book error: {traceback.format_exc()}")
-            self.msg("B\u0142\u0105d", f"Nieudany import: {str(e)[:120]}")
+            self.msg("BŁĄD", f"Nieudany import: {str(e)[:120]}")
 
     def _sanitize_col(self, name):
         s = "".join(c if c.isalnum() else "_" for c in str(name).strip().lower())
@@ -845,7 +1197,7 @@ class FutureApp(App):
                         else: time.sleep(random.uniform(3, 7))
                 else: self.stats["skip"] += 1; self.session_details.append(f"SKIP: {n} {s}")
                 Clock.schedule_once(lambda dt: self.update_progress(self.total_q - len(self.queue)))
-            srv.quit(); self.finish_mailing("Zako\u0144czono")
+            srv.quit(); self.finish_mailing("Zakończono")
         except Exception as e:
             self.log(f"mailing_worker error: {traceback.format_exc()}")
             self.finish_mailing(f"Error: {e}")
@@ -893,9 +1245,9 @@ class FutureApp(App):
         l.add_widget(Label(text="USTAWIENIA POCZTY", bold=True)); l.add_widget(self.ti_h); l.add_widget(self.ti_pt); l.add_widget(self.ti_u); l.add_widget(self.ti_p)
         bx = BoxLayout(size_hint_y=None, height=dp(45)); self.cb_b = CheckBox(size_hint_x=None, width=dp(45), active=d.get('batch', True)); bx.add_widget(self.cb_b); bx.add_widget(Label(text="Batching (przerwa 60s/30 maili)")); l.add_widget(bx)
         l.add_widget(ModernButton(text="ZAPISZ KONFIGURACJ\u0118", on_press=lambda x: [json.dump({'h':self.ti_h.text,'port':self.ti_pt.text,'u':self.ti_u.text,'p':self.ti_p.text,'batch':self.cb_b.active}, open(p,"w")), self.msg("OK","Zapisano")]))
-        l.add_widget(ModernButton(text="TEST PO\u0141\u0104CZENIA", on_press=lambda x: self.test_smtp_direct(), bg_color=(.1,.7,.4,1)))
-        l.add_widget(ModernButton(text="POKAŻ LOGI", on_press=self.show_logs))
-        l.add_widget(ModernButton(text="POWRÓT", on_press=lambda x: setattr(self.sm,'current','home'), bg_color=(.3,.3,.3,1))); self.sc_ref["smtp"].add_widget(l)
+        l.add_widget(ModernButton(text="TEST PO\u0141%C4%84CZENIA", on_press=lambda x: self.test_smtp_direct(), bg_color=(.1,.7,.4,1)))
+        l.add_widget(ModernButton(text="POKA\u017b LOGI", on_press=self.show_logs))
+        l.add_widget(ModernButton(text="POWR\u00d3T", on_press=lambda x: setattr(self.sm,'current','home'), bg_color=(.3,.3,.3,1))); self.sc_ref["smtp"].add_widget(l)
 
     def test_smtp_direct(self):
         try: s = self.connect_smtp({'h':self.ti_h.text,'port':self.ti_pt.text,'u':self.ti_u.text,'p':self.ti_p.text}); s.quit(); self.msg("OK", "Serwer SMTP Dzia\u0142a!"); self.log("SMTP test succeeded")
@@ -926,7 +1278,7 @@ class FutureApp(App):
                     srv.send_message(msg)
                 srv.quit(); Clock.schedule_once(lambda d: self.msg("OK", "Wysłano")); self.log(f"Special send file {path} to {len(self.selected_emails)} recipients")
             threading.Thread(target=task, daemon=True).start(); p.dismiss()
-        b.add_widget(ModernButton(text="WYŚLIJ PLIK", on_press=run)); p = Popup(title="Wiadomo\u015b\u0107", content=b, size_hint=(.9, .8)); p.open()
+        b.add_widget(ModernButton(text="WYŚLIJ PLIK", on_press=run)); p = Popup(title="Wiadomość", content=b, size_hint=(.9, .8)); p.open()
 
     def filter_table(self, i, v): self.filtered_data = [self.full_data[0]] + [r for r in self.full_data[1:] if any(v.lower() in str(c).lower() for c in r)]; self.refresh_table()
 
@@ -974,14 +1326,14 @@ class FutureApp(App):
         ts, tb = self.conn.execute("SELECT val FROM settings WHERE key='t_sub'").fetchone(), self.conn.execute("SELECT val FROM settings WHERE key='t_body'").fetchone()
         ti_s.text, ti_b.text = (ts[0] if ts else ""), (tb[0] if tb else "")
         l.add_widget(Label(text="SZABLON EMAIL", bold=True)); l.add_widget(ti_s); l.add_widget(ti_b)
-        l.add_widget(ModernButton(text="ZAPISZ", on_press=lambda x: [self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_sub',ti_s.text)), self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_body',ti_b.text)), self.conn.commit(), self.msg("OK","Wz\u00f3r zapisany")]))
+        l.add_widget(ModernButton(text="ZAPISZ", on_press=lambda x: [self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_sub',ti_s.text)), self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_body',ti_b.text)), self.conn.commit(), self.msg("OK","Wzór zapisany")]))
         l.add_widget(ModernButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'email'))); self.sc_ref["tmpl"].add_widget(l)
 
     def setup_contacts_ui(self):
         self.sc_ref["contacts"].clear_widgets()
         l, top = BoxLayout(orientation="vertical", padding=dp(10)), BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5))
         self.ti_cs = TextInput(hint_text="Szukaj..."); self.ti_cs.bind(text=self.refresh_contacts_list); top.add_widget(self.ti_cs)
-        top.add_widget(Button(text="+", size_hint_x=0.15, on_press=lambda x: self.form_contact())); top.add_widget(Button(text="Wróć", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
+        top.add_widget(Button(text="+", size_hint_x=0.15, on_press=lambda x: self.form_contact())); top.add_widget(Button(text="Wr\u00f3ć", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
         self.c_ls = GridLayout(cols=1, size_hint_y=None, spacing=dp(10)); self.c_ls.bind(minimum_height=self.c_ls.setter('height'))
         sc = ScrollView(); sc.add_widget(self.c_ls); l.add_widget(top); l.add_widget(sc); self.sc_ref["contacts"].add_widget(l)
 
@@ -1000,7 +1352,7 @@ class FutureApp(App):
             qbox = self.contact_quick_actions(d[4], d[0], d[1])
             r.add_widget(qbox)
             acts.add_widget(Button(text="Edytuj", on_press=lambda x, data=d: self.form_contact(*data)))
-            acts.add_widget(Button(text="Usu\u0144", background_color=(0.8,0.2,0.2,1), on_press=lambda x, n=d[0], s=d[1]: self.delete_contact(n, s)))
+            acts.add_widget(Button(text="Usuń", background_color=(0.8,0.2,0.2,1), on_press=lambda x, n=d[0], s=d[1]: self.delete_contact(n, s)))
             r.add_widget(acts); self.c_ls.add_widget(r)
 
     def msg(self, tit, txt):
@@ -1009,7 +1361,7 @@ class FutureApp(App):
     def update_stats(self, *a):
         try:
             count = self.conn.execute('SELECT count(*) FROM contacts').fetchone()[0]
-            s = f"Baza: {count} | Za\u0142\u0105czniki: {len(self.global_attachments)}"
+            s = f"Baza: {count} | Zał\u0105czniki: {len(self.global_attachments)}"
             if hasattr(self, 'lbl_stats'):
                 self.lbl_stats.text = s
             if hasattr(self, 'lbl_stats_paski'):
@@ -1025,9 +1377,9 @@ class FutureApp(App):
             if hasattr(self, 'pb_paski'):
                 self.pb_paski.value = val
             if hasattr(self, 'pb_label'):
-                self.pb_label.text = f"Post\u0119p: {d}/{self.total_q}"
+                self.pb_label.text = f"Postęp: {d}/{self.total_q}"
             if hasattr(self, 'pb_label_paski'):
-                self.pb_label_paski.text = f"Post\u0119p: {d}/{self.total_q}"
+                self.pb_label_paski.text = f"Postęp: {d}/{self.total_q}"
         except:
             pass
 
@@ -1060,7 +1412,7 @@ class FutureApp(App):
 
     def ask_before_send_worker(self, row, email, n, s):
         def dec(v): self.user_decision = "send" if v else "skip"; self.wait_for_user = False; px.dismiss()
-        box = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10)); box.add_widget(Label(text=f"POTWIERDŹ:\n[b]{n} {s}[/b]\n{email}", markup=True, halign="center"))
+        box = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10)); box.add_widget(Label(text=f"POTWIERD\u0179:\n[b]{n} {s}[/b]\n{email}", markup=True, halign="center"))
         btns = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(10)); btns.add_widget(Button(text="WYŚLIJ", on_press=lambda x: dec(True), background_color=(0,0.6,0,1))); btns.add_widget(Button(text="POMIŃ", on_press=lambda x: dec(False), background_color=(0.7,0,0,1)))
         box.add_widget(btns); px = Popup(title="Weryfikacja", content=box, size_hint=(0.9, 0.45), auto_dismiss=False); px.open()
 
@@ -1077,7 +1429,7 @@ class FutureApp(App):
             px.dismiss()
             self.refresh_contacts_list()
             self.update_stats()
-        px = Popup(title="Usu\u0144?", content=BoxLayout(orientation="vertical", children=[ModernButton(text="USUŃ KONTAKT", on_press=pr, size_hint_y=None, height=dp(50))]), size_hint=(0.7,0.3)); px.open()
+        px = Popup(title="Usuń?", content=BoxLayout(orientation="vertical", children=[ModernButton(text="USUŃ KONTAKT", on_press=pr, size_hint_y=None, height=dp(50))]), size_hint=(0.7,0.3)); px.open()
 
     def form_contact(self, n="", s="", e="", pes="", ph="", workplace="", apartment=""):
         b, f_ins = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)), [TextInput(text=str(n), hint_text="Imi\u0119"), TextInput(text=str(s), hint_text="Nazwisko"), TextInput(text=str(e), hint_text="Email"), TextInput(text=str(pes), hint_text="PESEL"), TextInput(text=str(ph), hint_text="Telefon")]
@@ -1123,7 +1475,7 @@ class FutureApp(App):
         self.cb_paski_auto.bind(active=self.on_auto_checkbox_changed)
         ab.add_widget(self.cb_paski_auto); ab.add_widget(Label(text="AUTOMATYCZNA WYSYŁKA", bold=True))
         l.add_widget(ab)
-        self.lbl_stats_paski = Label(text="Baza: 0 | Za\u0142\u0105czniki: 0", height=dp(30)); l.add_widget(self.lbl_stats_paski)
+        self.lbl_stats_paski = Label(text="Baza: 0 | Zał\u0105czniki: 0", height=dp(30)); l.add_widget(self.lbl_stats_paski)
         self.pb_label_paski = Label(text="Gotowy", height=dp(25)); self.pb_paski = ProgressBar(max=100, height=dp(20)); l.add_widget(self.pb_label_paski); l.add_widget(self.pb_paski)
         l.add_widget(ModernButton(text="Wczytaj arkusz płac", on_press=lambda x: self.open_picker("data"), height=dp(50), size_hint_y=None))
         l.add_widget(ModernButton(text="Podgląd i eksport", on_press=lambda x: [self.refresh_table(), setattr(self.sm, 'current', 'table')] if self.full_data else self.msg("!", "Wczytaj arkusz!"), height=dp(50), size_hint_y=None))
@@ -1142,7 +1494,7 @@ class FutureApp(App):
         self.sc_ref["pracownicy"].clear_widgets()
         b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
         b.add_widget(Label(text="Modu\u0142 Pracownicy", bold=True))
-        b.add_widget(Label(text="Placeholder - modu\u0142 Pracownicy do p\u00f3\u017aniejszego rozwini\u0119cia"))
+        b.add_widget(Label(text="Placeholder - modu\u0142 Pracownicy do pó\u017aniejszego rozwini\u0119cia"))
         b.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home')))
         self.sc_ref["pracownicy"].add_widget(b)
 
@@ -1150,7 +1502,7 @@ class FutureApp(App):
         self.sc_ref["zaklady"].clear_widgets()
         b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
         b.add_widget(Label(text="Modu\u0142 Zakłady", bold=True))
-        b.add_widget(Label(text="Placeholder - modu\u0142 Zakłady do p\u00f3\u017aniejszego rozwini\u0119cia"))
+        b.add_widget(Label(text="Placeholder - modu\u0142 Zakłady do pó\u017aniejszego rozwini\u0119cia"))
         b.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home')))
         self.sc_ref["zaklady"].add_widget(b)
 
