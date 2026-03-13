@@ -91,8 +91,9 @@ class FutureApp(App):
         self.global_attachments, self.queue = [], []
         self.stats = {"ok": 0, "fail": 0, "skip": 0}
         self.idx_name, self.idx_surname, self.idx_pesel = 0, 1, -1
-        self.auto_send_mode = self.is_mailing_running = False
-        
+        self.auto_send_mode = False
+        self.is_mailing_running = False
+
         self.init_db()
         self.sm = ScreenManager(transition=SlideTransition())
         self.add_screens()
@@ -132,17 +133,14 @@ class FutureApp(App):
         menu.add_widget(self.ti_tab_search)
         menu.add_widget(Button(text="KOLUMNY", size_hint_x=0.2, on_press=self.popup_columns))
         menu.add_widget(Button(text="WRÓĆ", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
-        
         hs = ScrollView(size_hint_y=None, height=dp(55), do_scroll_y=False)
         self.table_header_layout = GridLayout(rows=1, size_hint=(None, None), height=dp(55))
         hs.add_widget(self.table_header_layout)
-        
         ds = ScrollView(do_scroll_x=True, do_scroll_y=True)
         self.table_content_layout = GridLayout(size_hint=(None, None))
         self.table_content_layout.bind(minimum_height=self.table_content_layout.setter('height'), minimum_width=self.table_content_layout.setter('width'))
         ds.add_widget(self.table_content_layout)
         ds.bind(scroll_x=lambda inst, val: setattr(hs, 'scroll_x', val))
-        
         root.add_widget(menu); root.add_widget(hs); root.add_widget(ds)
         self.sc_ref["table"].add_widget(root)
 
@@ -151,20 +149,16 @@ class FutureApp(App):
         if not self.filtered_data: return
         w_cell, w_act, h = dp(170), dp(220), dp(55)
         headers = [self.full_data[0][i] for i in self.export_indices]
-        
         total_w = (len(headers) * w_cell) + w_act
         self.table_header_layout.cols = self.table_content_layout.cols = len(headers) + 1
         self.table_header_layout.width = self.table_content_layout.width = total_w
-
         for head in headers: self.table_header_layout.add_widget(ColorSafeLabel(text=str(head), bg_color=COLOR_HEADER, bold=True, size=(w_cell, h), size_hint=(None,None), text_color=(0,0,0,1)))
         self.table_header_layout.add_widget(ColorSafeLabel(text="AKCJE", bg_color=COLOR_HEADER, bold=True, size=(w_act, h), size_hint=(None,None), text_color=(0,0,0,1)))
-
         for r_idx, row in enumerate(self.filtered_data[1:]):
             row_bg = COLOR_ROW_A if r_idx % 2 == 0 else COLOR_ROW_B
             for c_idx in self.export_indices:
                 val = str(row[c_idx]) if c_idx < len(row) and str(row[c_idx]).strip() != "" else "0"
                 self.table_content_layout.add_widget(ColorSafeLabel(text=val, bg_color=row_bg, size=(w_cell, h), size_hint=(None,None)))
-            
             act_box = BoxLayout(size=(w_act, h), size_hint=(None,None), spacing=dp(4), padding=dp(4))
             act_box.add_widget(Button(text="ZAPISZ", on_press=lambda x, r=row: self.export_single_row(r), background_color=(0.2, 0.6, 0.2, 1)))
             act_box.add_widget(Button(text="WYŚLIJ", on_press=lambda x, r=row: self.send_individual_from_table(r), background_color=(0.1, 0.5, 0.9, 1)))
@@ -179,11 +173,9 @@ class FutureApp(App):
             h_idx = 0
             for i, r in enumerate(raw[:15]): 
                 if any(x in " ".join([str(v) for v in r]).lower() for x in ["imię", "imie", "nazwisko"]): h_idx = i; break
-            
             self.full_data = raw[h_idx:]
             self.filtered_data = self.full_data
             self.export_indices = list(range(len(self.full_data[0])))
-            
             for i,v in enumerate(self.full_data[0]):
                 v = str(v).lower()
                 if "imi" in v: self.idx_name = i
@@ -209,28 +201,107 @@ class FutureApp(App):
     def setup_email_ui(self):
         l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10))
         ab = BoxLayout(size_hint_y=None, height=dp(45), spacing=dp(10))
-        self.cb_auto = CheckBox(size_hint_x=None, width=dp(45)); self.cb_auto.bind(active=lambda i, v: setattr(self, 'auto_send_mode', v))
+        self.cb_auto = CheckBox(size_hint_x=None, width=dp(45))
+        self.cb_auto.active = self.auto_send_mode
+        self.cb_auto.bind(active=self.on_auto_checkbox_changed)
         ab.add_widget(self.cb_auto); ab.add_widget(Label(text="AUTOMATYCZNA WYSYŁKA", bold=True)); l.add_widget(ab)
         self.lbl_stats = Label(text="Baza: 0", height=dp(30)); l.add_widget(self.lbl_stats)
         l.add_widget(ModernButton(text="WYCZYŚĆ ZAŁĄCZNIKI", on_press=self.clear_all_attachments, height=dp(45), size_hint_y=None, bg_color=(0.7, 0.1, 0.1, 1)))
         self.pb_label = Label(text="Gotowy", height=dp(25)); self.pb = ProgressBar(max=100, height=dp(20)); l.add_widget(self.pb_label); l.add_widget(self.pb)
-        btns = [("IMPORT KSIĄŻKI", lambda x: self.open_picker("book")), ("ZARZĄDZAJ BAZĄ", lambda x: [self.refresh_contacts_list(), setattr(self.sm, 'current', 'contacts')]), ("EDYTUJ SZABLON", lambda x: setattr(self.sm, 'current', 'tmpl')), ("DODAJ ZAŁĄCZNIK", lambda x: self.open_picker("attachment")), ("WYŚLIJ JEDEN PLIK", self.start_special_send_flow), ("START MASOWA WYSYŁKA", self.start_mass_mailing)]
+        btns = [("EDYTUJ SZABLON", lambda x: setattr(self.sm, 'current', 'tmpl')), ("DODAJ ZAŁĄCZNIK", lambda x: self.open_picker("attachment")), ("WYŚLIJ JEDEN PLIK", self.start_special_send_flow), ("START MASOWA WYSYŁKA", self.start_mass_mailing)]
         for t, c in btns: l.add_widget(ModernButton(text=t, on_press=c, height=dp(50), size_hint_y=None))
         l.add_widget(ModernButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'home'), bg_color=(0.3,0.3,0.3,1))); self.sc_ref["email"].add_widget(l); self.update_stats()
+
+    def on_auto_checkbox_changed(self, instance, value):
+        self.auto_send_mode = bool(value)
+        try:
+            if hasattr(self, 'cb_paski_auto') and self.cb_paski_auto.active != value:
+                self.cb_paski_auto.active = value
+        except: pass
 
     def process_book(self, path):
         try:
             wb = load_workbook(path, data_only=True); ws = wb.active; raw = list(ws.iter_rows(values_only=True))
-            h = [str(x).lower() for x in raw[0]]; iN, iS, iE, iP = 0, 1, 2, -1
-            for i,v in enumerate(h):
-                if "imi" in v: iN=i
-                elif "naz" in v: iS=i
-                elif "@" in v or "mail" in v: iE=i
-                elif "pesel" in v: iP=i
-            for r in raw[1:]:
-                if r[iE] and "@" in str(r[iE]): self.conn.execute("INSERT OR REPLACE INTO contacts VALUES (?,?,?,?,?)", (str(r[iN]).lower(), str(r[iS]).lower(), str(r[iE]).strip(), str(r[iP]) if iP!=-1 else "", "")); 
-            self.conn.commit(); self.update_stats(); self.msg("OK", "Baza zaktualizowana")
-        except: self.msg("Błąd", "Nieudany import")
+            if not raw or not raw[0]:
+                self.msg("Błąd", "Pusty plik")
+                return
+            headers = ["" if v is None else str(v).strip() for v in raw[0]]
+            h_low = [h.lower() for h in headers]
+            iN = iS = iE = iP = iPhone = -1
+            for i, v in enumerate(h_low):
+                if iN == -1 and ("imi" in v or v == "name"): iN = i
+                if iS == -1 and ("naz" in v or v == "surname" or v == "nazw" in v): iS = i
+                if iE == -1 and ("@" in v or "mail" in v): iE = i
+                if iP == -1 and "pesel" in v: iP = i
+                if iPhone == -1 and any(x in v for x in ["tel", "phone", "telefon"]): iPhone = i
+            car_keys = ["rej", "rejestr", "plate", "nr rejestr", "nr rej", "vin", "marka", "model", "brand", "car", "samoch"]
+            clothes_keys = ["ubran", "odziez", "rozmiar", "size", "typ", "kolor", "clothe", "garment"]
+            car_cols = []
+            clothes_cols = []
+            for i, v in enumerate(h_low):
+                if any(k in v for k in car_keys): car_cols.append((i, headers[i]))
+                if any(k in v for k in clothes_keys): clothes_cols.append((i, headers[i]))
+            if iE != -1:
+                for r in raw[1:]:
+                    try:
+                        e = r[iE] if iE < len(r) else None
+                        if e and "@" in str(e):
+                            n = r[iN] if iN < len(r) and iN != -1 else ""
+                            s = r[iS] if iS < len(r) and iS != -1 else ""
+                            p = r[iP] if iP < len(r) and iP != -1 else ""
+                            ph = r[iPhone] if iPhone < len(r) and iPhone != -1 else ""
+                            self.conn.execute("INSERT OR REPLACE INTO contacts VALUES (?,?,?,?,?)", (str(n).lower(), str(s).lower(), str(e).strip(), str(p) if p is not None else "", str(ph) if ph is not None else ""))
+                    except:
+                        pass
+            if car_cols:
+                table_cols = ["id INTEGER PRIMARY KEY AUTOINCREMENT"] + [f"'{self._sanitize_col(c[1])}' TEXT" for c in car_cols]
+                self.conn.execute("CREATE TABLE IF NOT EXISTS cars (" + ",".join(table_cols) + ")")
+                insert_cols = [self._sanitize_col(c[1]) for c in car_cols]
+                q = "INSERT INTO cars (" + ",".join([f"'{c}'" for c in insert_cols]) + ") VALUES (" + ",".join(["?"] * len(insert_cols)) + ")"
+                for r in raw[1:]:
+                    vals = []
+                    for idx, _ in car_cols:
+                        vals.append(str(r[idx]) if idx < len(r) and r[idx] is not None else "")
+                    if any(v.strip() for v in vals):
+                        try:
+                            self.conn.execute(q, vals)
+                        except:
+                            pass
+            if clothes_cols:
+                table_cols = ["id INTEGER PRIMARY KEY AUTOINCREMENT"] + [f"'{self._sanitize_col(c[1])}' TEXT" for c in clothes_cols]
+                self.conn.execute("CREATE TABLE IF NOT EXISTS clothes (" + ",".join(table_cols) + ")")
+                insert_cols = [self._sanitize_col(c[1]) for c in clothes_cols]
+                q = "INSERT INTO clothes (" + ",".join([f"'{c}'" for c in insert_cols]) + ") VALUES (" + ",".join(["?"] * len(insert_cols)) + ")"
+                for r in raw[1:]:
+                    vals = []
+                    for idx, _ in clothes_cols:
+                        vals.append(str(r[idx]) if idx < len(r) and r[idx] is not None else "")
+                    if any(v.strip() for v in vals):
+                        try:
+                            self.conn.execute(q, vals)
+                        except:
+                            pass
+            self.conn.commit()
+            new_ver = self._increment_db_version()
+            self.update_stats()
+            self.msg("OK", f"Baza zaktualizowana. Wersja: {new_ver}")
+        except Exception as e:
+            self.msg("Błąd", f"Nieudany import: {str(e)[:120]}")
+
+    def _sanitize_col(self, name):
+        s = "".join(c if c.isalnum() else "_" for c in str(name).strip().lower())
+        s = s.strip("_")
+        if not s:
+            s = "col"
+        return s
+
+    def _increment_db_version(self):
+        cur = self.conn.execute("SELECT val FROM settings WHERE key='db_version'").fetchone()
+        v = int(cur[0]) if cur and cur[0].isdigit() else 0
+        v += 1
+        self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('db_version', str(v)))
+        self.conn.commit()
+        return v
 
     def mailing_worker(self):
         cfg_p = Path(self.user_data_dir)/"smtp.json"
@@ -302,7 +373,8 @@ class FutureApp(App):
         l.add_widget(Label(text="USTAWIENIA POCZTY", bold=True)); l.add_widget(self.ti_h); l.add_widget(self.ti_pt); l.add_widget(self.ti_u); l.add_widget(self.ti_p)
         bx = BoxLayout(size_hint_y=None, height=dp(45)); self.cb_b = CheckBox(size_hint_x=None, width=dp(45), active=d.get('batch', True)); bx.add_widget(self.cb_b); bx.add_widget(Label(text="Batching (przerwa 60s/30 maili)")); l.add_widget(bx)
         l.add_widget(ModernButton(text="ZAPISZ KONFIGURACJĘ", on_press=lambda x: [json.dump({'h':self.ti_h.text,'port':self.ti_pt.text,'u':self.ti_u.text,'p':self.ti_p.text,'batch':self.cb_b.active}, open(p,"w")), self.msg("OK","Zapisano")]))
-        l.add_widget(ModernButton(text="TEST POŁĄCZENIA", on_press=lambda x: self.test_smtp_direct(), bg_color=(.1,.7,.4,1))); l.add_widget(ModernButton(text="POWRÓT", on_press=lambda x: setattr(self.sm,'current','home'), bg_color=(.3,.3,.3,1))); self.sc_ref["smtp"].add_widget(l)
+        l.add_widget(ModernButton(text="TEST POŁĄCZENIA", on_press=lambda x: self.test_smtp_direct(), bg_color=(.1,.7,.4,1)))
+        l.add_widget(ModernButton(text="POWRÓT", on_press=lambda x: setattr(self.sm,'current','home'), bg_color=(.3,.3,.3,1))); self.sc_ref["smtp"].add_widget(l)
 
     def test_smtp_direct(self):
         try: s = self.connect_smtp({'h':self.ti_h.text,'port':self.ti_pt.text,'u':self.ti_u.text,'p':self.ti_p.text}); s.quit(); self.msg("OK", "Serwer SMTP Działa!")
@@ -381,7 +453,7 @@ class FutureApp(App):
     def setup_contacts_ui(self):
         l, top = BoxLayout(orientation="vertical", padding=dp(10)), BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5))
         self.ti_cs = TextInput(hint_text="Szukaj..."); self.ti_cs.bind(text=self.refresh_contacts_list); top.add_widget(self.ti_cs)
-        top.add_widget(Button(text="+", size_hint_x=0.15, on_press=lambda x: self.form_contact())); top.add_widget(Button(text="Wróć", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'email')))
+        top.add_widget(Button(text="+", size_hint_x=0.15, on_press=lambda x: self.form_contact())); top.add_widget(Button(text="Wróć", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
         self.c_ls = GridLayout(cols=1, size_hint_y=None, spacing=dp(10)); self.c_ls.bind(minimum_height=self.c_ls.setter('height'))
         sc = ScrollView(); sc.add_widget(self.c_ls); l.add_widget(top); l.add_widget(sc); self.sc_ref["contacts"].add_widget(l)
 
@@ -401,8 +473,20 @@ class FutureApp(App):
     def update_stats(self, *a):
         try: self.lbl_stats.text = f"Baza: {self.conn.execute('SELECT count(*) FROM contacts').fetchone()[0]} | Załączniki: {len(self.global_attachments)}"
         except: pass
-    def update_progress(self, d): self.pb.value = int((d/self.total_q)*100); self.pb_label.text = f"Postęp: {d}/{self.total_q}"
-    def finish_mailing(self, s): 
+    def update_progress(self, d):
+        try:
+            val = int((d/self.total_q)*100) if self.total_q else 0
+            if hasattr(self, 'pb'):
+                self.pb.value = val
+            if hasattr(self, 'pb_paski'):
+                self.pb_paski.value = val
+            if hasattr(self, 'pb_label'):
+                self.pb_label.text = f"Postęp: {d}/{self.total_q}"
+            if hasattr(self, 'pb_label_paski'):
+                self.pb_label_paski.text = f"Postęp: {d}/{self.total_q}"
+        except:
+            pass
+    def finish_mailing(self, s):
         self.is_mailing_running = False; det = "\n".join(self.session_details); self.conn.execute("INSERT INTO reports (date, ok, fail, skip, auto, details) VALUES (?,?,?,?,?,?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), self.stats['ok'], self.stats['fail'], self.stats['skip'], 0, det)); self.conn.commit()
         Clock.schedule_once(lambda dt: self.msg("Mailing", f"{s}\nSukces: {self.stats['ok']}"))
 
@@ -460,25 +544,34 @@ class FutureApp(App):
 
     def setup_paski_ui(self):
         l = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
-        l.add_widget(Label(text="Moduł Paski - wszystkie opcje", bold=True))
+        header = BoxLayout(size_hint_y=None, height=dp(40))
+        header.add_widget(Label(text="Moduł Paski", bold=True))
+        l.add_widget(header)
+        ab = BoxLayout(size_hint_y=None, height=dp(45), spacing=dp(10))
+        self.cb_paski_auto = CheckBox(size_hint_x=None, width=dp(45))
+        self.cb_paski_auto.active = self.auto_send_mode
+        self.cb_paski_auto.bind(active=self.on_auto_checkbox_changed)
+        ab.add_widget(self.cb_paski_auto); ab.add_widget(Label(text="AUTOMATYCZNA WYSYŁKA", bold=True))
+        l.add_widget(ab)
+        self.pb_label_paski = Label(text="Gotowy", height=dp(25)); self.pb_paski = ProgressBar(max=100, height=dp(20)); l.add_widget(self.pb_label_paski); l.add_widget(self.pb_paski)
         l.add_widget(ModernButton(text="Wczytaj arkusz płac", on_press=lambda x: self.open_picker("data"), height=dp(50), size_hint_y=None))
         l.add_widget(ModernButton(text="Podgląd i eksport", on_press=lambda x: [self.refresh_table(), setattr(self.sm, 'current', 'table')] if self.full_data else self.msg("!", "Wczytaj arkusz!"), height=dp(50), size_hint_y=None))
-        l.add_widget(ModernButton(text="Centrum mailingowe", on_press=lambda x: setattr(self.sm, 'current', 'email'), height=dp(50), size_hint_y=None))
+        l.add_widget(ModernButton(text="Edytuj szablon", on_press=lambda x: setattr(self.sm, 'current', 'tmpl'), height=dp(50), size_hint_y=None))
+        l.add_widget(ModernButton(text="Dołącz załącznik", on_press=lambda x: self.open_picker("attachment"), height=dp(50), size_hint_y=None))
+        l.add_widget(ModernButton(text="Wyślij jeden plik", on_press=self.start_special_send_flow, height=dp(50), size_hint_y=None))
+        l.add_widget(ModernButton(text="Start masowa wysyłka", on_press=self.start_mass_mailing, height=dp(50), size_hint_y=None))
         l.add_widget(ModernButton(text="Raporty sesji", on_press=lambda x: [self.refresh_reports(), setattr(self.sm, 'current', 'report')], height=dp(50), size_hint_y=None))
-        l.add_widget(ModernButton(text="Ustawienia SMTP", on_press=lambda x: setattr(self.sm, 'current', 'smtp'), height=dp(50), size_hint_y=None))
-        l.add_widget(ModernButton(text="Import książki", on_press=lambda x: self.open_picker("book"), height=dp(50), size_hint_y=None))
-        l.add_widget(ModernButton(text="Zarządzaj bazą", on_press=lambda x: [self.refresh_contacts_list(), setattr(self.sm, 'current', 'contacts')], height=dp(50), size_hint_y=None))
+        l.add_widget(ModernButton(text="Wyczyść załączniki", on_press=self.clear_all_attachments, height=dp(50), size_hint_y=None))
         l.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home'), height=dp(55), size_hint_y=None, bg_color=(0.3,0.3,0.3,1)))
         self.sc_ref["paski"].add_widget(l)
 
     def setup_settings_ui(self):
         l = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
         l.add_widget(Label(text="Ustawienia", bold=True))
+        l.add_widget(ModernButton(text="Dodaj bazę danych", on_press=lambda x: self.open_picker("book"), height=dp(50), size_hint_y=None))
         l.add_widget(ModernButton(text="Ustawienia SMTP", on_press=lambda x: setattr(self.sm, 'current', 'smtp'), height=dp(50), size_hint_y=None))
         l.add_widget(ModernButton(text="Edytuj szablon email", on_press=lambda x: setattr(self.sm, 'current', 'tmpl'), height=dp(50), size_hint_y=None))
-        l.add_widget(ModernButton(text="Import książki", on_press=lambda x: self.open_picker("book"), height=dp(50), size_hint_y=None))
-        l.add_widget(ModernButton(text="Wczytaj arkusz", on_press=lambda x: self.open_picker("data"), height=dp(50), size_hint_y=None))
-        l.add_widget(ModernButton(text="Zarządzaj bazą", on_press=lambda x: [self.refresh_contacts_list(), setattr(self.sm, 'current', 'contacts')], height=dp(50), size_hint_y=None))
+        l.add_widget(ModernButton(text="Wczytaj arkusz płac", on_press=lambda x: self.open_picker("data"), height=dp(50), size_hint_y=None))
         l.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home'), height=dp(55), size_hint_y=None, bg_color=(0.3,0.3,0.3,1)))
         self.sc_ref["settings"].add_widget(l)
 
