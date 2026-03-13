@@ -338,6 +338,17 @@ class FutureApp(App):
         except:
             pass
 
+    def patch_contact_extra_fields(self):
+        try:
+            self.conn.execute("ALTER TABLE contacts ADD COLUMN workplace TEXT")
+        except:
+            pass
+        try:
+            self.conn.execute("ALTER TABLE contacts ADD COLUMN apartment TEXT")
+        except:
+            pass
+        self.conn.commit()
+
     def init_db(self):
         db_p = Path(self.user_data_dir) / "future_v20.db"
         self.conn = sqlite3.connect(str(db_p), check_same_thread=False)
@@ -389,6 +400,10 @@ class FutureApp(App):
         )
         """)
         self.conn.commit()
+        try:
+            self.patch_contact_extra_fields()
+        except:
+            pass
 
     def add_screens(self):
         names = ["home", "table", "email", "smtp", "tmpl", "contacts", "report", "cars", "clothes", "paski", "pracownicy", "zaklady", "settings"]
@@ -589,7 +604,7 @@ class FutureApp(App):
                             s = r[iS] if iS < len(r) and iS != -1 else ""
                             p = r[iP] if iP < len(r) and iP != -1 else ""
                             ph = r[iPhone] if iPhone < len(r) and iPhone != -1 else ""
-                            self.conn.execute("INSERT OR REPLACE INTO contacts VALUES (?,?,?,?,?)", (str(n).lower(), str(s).lower(), str(e).strip(), str(p) if p is not None else "", str(ph) if ph is not None else ""))
+                            self.conn.execute("INSERT OR REPLACE INTO contacts (name,surname,email,pesel,phone,workplace,apartment) VALUES (?,?,?,?,?,?,?)", (str(n).lower(), str(s).lower(), str(e).strip(), str(p) if p is not None else "", str(ph) if ph is not None else "", "", ""))
                     except:
                         pass
             iN_cl = iS_cl = iPlant = iShirt = iHoodie = iPants = iJacket = iShoes = -1
@@ -621,10 +636,14 @@ class FutureApp(App):
                         pass
                 self.conn.commit()
             self.conn.commit()
+            try:
+                clothes_count = self.conn.execute("SELECT COUNT(*) FROM clothes_sizes").fetchone()[0]
+            except:
+                clothes_count = 0
             new_ver = self._increment_db_version()
             self.update_stats()
-            self.msg("OK", f"Baza zaktualizowana. Wersja: {new_ver}")
-            self.log(f"Imported book: {path}")
+            self.msg("OK", f"Baza ubrań zaktualizowana. Rekordy ubrań: {clothes_count}\nDane ubrań dostępne w module 'Ubranie robocze'.")
+            self.log(f"Imported book: {path} | clothes={clothes_count}")
         except Exception as e:
             self.log(f"process_book error: {traceback.format_exc()}")
             self.msg("Błąd", f"Nieudany import: {str(e)[:120]}")
@@ -815,14 +834,16 @@ class FutureApp(App):
         sc = ScrollView(); sc.add_widget(self.c_ls); l.add_widget(top); l.add_widget(sc); self.sc_ref["contacts"].add_widget(l)
 
     def refresh_contacts_list(self, *args):
-        self.c_ls.clear_widgets(); sv = self.ti_cs.text.lower(); rows = self.conn.execute("SELECT name, surname, email, pesel, phone FROM contacts ORDER BY surname ASC").fetchall()
+        self.c_ls.clear_widgets(); sv = self.ti_cs.text.lower()
+        rows = self.conn.execute("SELECT name, surname, email, pesel, phone, workplace, apartment FROM contacts ORDER BY surname ASC").fetchall()
         for d in rows:
             if sv and sv not in f"{d[0]} {d[1]} {d[2]}".lower(): continue
             r = BoxLayout(size_hint_y=None, height=dp(125), padding=dp(10))
             with r.canvas.before: Color(*COLOR_CARD); Rectangle(pos=r.pos, size=r.size)
             inf, acts = BoxLayout(orientation="vertical"), BoxLayout(size_hint_x=0.3, orientation="vertical", spacing=dp(4))
             inf.add_widget(Label(text=f"{d[0]} {d[1]}".title(), bold=True, halign="left", text_size=(dp(250),None)))
-            inf.add_widget(Label(text=f"E: {d[2]}\nP: {d[3]}\nT: {d[4] if d[4] else '-'}", font_size='11sp', halign="left", text_size=(dp(250),None), color=(0.7,0.7,0.7,1)))
+            info_text = f"E: {d[2]}\nP: {d[3]}\nT: {d[4] if d[4] else '-'}\nZakład: {d[5] if d[5] else '-'}\nAdres: {d[6] if d[6] else '-'}"
+            inf.add_widget(Label(text=info_text, font_size='11sp', halign="left", text_size=(dp(250),None), color=(0.7,0.7,0.7,1)))
             r.add_widget(inf); acts.add_widget(Button(text="Edytuj", on_press=lambda x, data=d: self.form_contact(*data))); acts.add_widget(Button(text="Usuń", background_color=(0.8,0.2,0.2,1), on_press=lambda x, n=d[0], s=d[1]: self.delete_contact(n, s))); r.add_widget(acts); self.c_ls.add_widget(r)
 
     def msg(self, tit, txt):
@@ -896,10 +917,25 @@ class FutureApp(App):
         def pr(_): [self.conn.execute("DELETE FROM contacts WHERE name=? AND surname=?", (n, s)), self.conn.commit(), px.dismiss(), self.refresh_contacts_list(), self.update_stats()]
         px = Popup(title="Usuń?", content=Button(text="USUŃ KONTAKT", on_press=pr, background_color=(1,0,0,1)), size_hint=(0.7,0.3)); px.open()
 
-    def form_contact(self, n="", s="", e="", pes="", ph=""):
+    def form_contact(self, n="", s="", e="", pes="", ph="", workplace="", apartment=""):
         b, f_ins = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)), [TextInput(text=str(n), hint_text="Imię"), TextInput(text=str(s), hint_text="Nazwisko"), TextInput(text=str(e), hint_text="Email"), TextInput(text=str(pes), hint_text="PESEL"), TextInput(text=str(ph), hint_text="Telefon")]
         for f in f_ins: b.add_widget(f)
-        def save(_): [self.conn.execute("INSERT OR REPLACE INTO contacts VALUES (?,?,?,?,?)", (f_ins[0].text.lower(), f_ins[1].text.lower(), f_ins[2].text.strip(), f_ins[3].text.strip(), f_ins[4].text.strip())), self.conn.commit(), px.dismiss(), self.refresh_contacts_list(), self.update_stats()]
+        workplace_ti = TextInput(hint_text="Zakład pracy (np. Rybnik KWK Jankowice)", size_hint_y=None, height=dp(40), text=str(workplace))
+        apartment_ti = TextInput(hint_text="Mieszkanie / adres", size_hint_y=None, height=dp(40), text=str(apartment))
+        b.add_widget(workplace_ti); b.add_widget(apartment_ti)
+        def save(_):
+            self.conn.execute("INSERT OR REPLACE INTO contacts (name,surname,email,pesel,phone,workplace,apartment) VALUES (?,?,?,?,?,?,?)",
+                (f_ins[0].text.lower(),
+                 f_ins[1].text.lower(),
+                 f_ins[2].text.strip(),
+                 f_ins[3].text.strip(),
+                 f_ins[4].text.strip(),
+                 workplace_ti.text.strip(),
+                 apartment_ti.text.strip()))
+            self.conn.commit()
+            px.dismiss()
+            self.refresh_contacts_list()
+            self.update_stats()
         b.add_widget(ModernButton(text="ZAPISZ", on_press=save)); px = Popup(title="Kontakt", content=b, size_hint=(0.9, 0.85)); px.open()
 
     def clear_all_attachments(self, _):
