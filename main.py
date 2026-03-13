@@ -1,4 +1,3 @@
-# v19 — 2026-03-13
 import os
 import json
 import sqlite3
@@ -363,7 +362,7 @@ class FutureApp(App):
         self._log_buffer = []
 
         self.init_db()
-        self.log_file = Path(self.user_data_dir) / "future_v19.log"
+        self.log_file = Path(self.user_data_dir) / "future_v20.log"
         try:
             self.log_file.touch(exist_ok=True)
         except:
@@ -386,7 +385,7 @@ class FutureApp(App):
             pass
 
     def init_db(self):
-        db_p = Path(self.user_data_dir) / "future_v19.db"
+        db_p = Path(self.user_data_dir) / "future_v20.db"
         self.conn = sqlite3.connect(str(db_p), check_same_thread=False)
         self.conn.execute("CREATE TABLE IF NOT EXISTS contacts (name TEXT, surname TEXT, email TEXT, pesel TEXT, phone TEXT, PRIMARY KEY(name, surname))")
         self.conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, val TEXT)")
@@ -443,13 +442,27 @@ class FutureApp(App):
         self.setup_ui_all()
         for s in self.sc_ref.values():
             self.sm.add_widget(s)
+        if "clothes" in self.sc_ref:
+            self.sc_ref["clothes"].bind(on_enter=lambda inst, *a: self._on_main_clothes_enter())
+
+    def _on_main_clothes_enter(self):
+        try:
+            if hasattr(self, 'clothes_sm'):
+                self.clothes_sm.current = 'sizes'
+                scr = self.clothes_sm.get_screen('sizes')
+                if hasattr(scr, 'build_ui'):
+                    scr.build_ui()
+                if hasattr(scr, 'refresh'):
+                    scr.refresh()
+        except:
+            pass
 
     def setup_ui_all(self):
         self.sc_ref["home"].clear_widgets()
-        root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(10))
-        lbl = Label(text="FUTURE ULTIMATE v19", font_size='34sp', bold=True, color=COLOR_PRIMARY, size_hint_y=None, height=dp(70))
+        root = BoxLayout(orientation="vertical", padding=[dp(10), dp(10), dp(10), dp(80)], spacing=dp(10))
+        lbl = Label(text="FUTURE ULTIMATE v20", font_size='34sp', bold=True, color=COLOR_PRIMARY, size_hint_y=None, height=dp(70))
         root.add_widget(lbl)
-        sv = ScrollView(size_hint=(1, None), size=(Window.width, dp(300)))
+        sv = ScrollView(size_hint=(1,1))
         grid = GridLayout(cols=2, spacing=dp(12), padding=dp(10), size_hint_y=None)
         grid.bind(minimum_height=grid.setter('height'))
         btn_props = dict(size_hint_y=None, height=dp(80))
@@ -471,20 +484,32 @@ class FutureApp(App):
     def setup_clothes_container(self):
         self.sc_ref["clothes"].clear_widgets()
         container = BoxLayout(orientation='vertical')
-        top = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(6), padding=dp(6))
-        top.add_widget(Label(text="Ubrania robocze", bold=True))
+        hs = ScrollView(size_hint_y=None, height=dp(56), do_scroll_x=True)
+        inner = BoxLayout(size_hint_x=None, height=dp(56))
+        inner.bind(minimum_width=inner.setter('width'))
+        btn_w = dp(120)
+        inner.add_widget(Button(text="Rozmiary", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'sizes')))
+        inner.add_widget(Button(text="Zamówienia", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'orders')))
+        inner.add_widget(Button(text="Status", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'status')))
+        inner.add_widget(Button(text="Raporty", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'reports')))
+        hs.add_widget(inner)
+        container.add_widget(hs)
         self.clothes_sm = ScreenManager(transition=SlideTransition())
-        top.add_widget(Button(text="Rozmiary", size_hint_x=None, width=dp(120), on_press=lambda x: setattr(self.clothes_sm, 'current', 'sizes')))
-        top.add_widget(Button(text="Zamówienia", size_hint_x=None, width=dp(120), on_press=lambda x: setattr(self.clothes_sm, 'current', 'orders')))
-        top.add_widget(Button(text="Status", size_hint_x=None, width=dp(120), on_press=lambda x: setattr(self.clothes_sm, 'current', 'status')))
-        top.add_widget(Button(text="Raporty", size_hint_x=None, width=dp(120), on_press=lambda x: setattr(self.clothes_sm, 'current', 'reports')))
-        container.add_widget(top)
         self.clothes_sm.add_widget(ClothesSizesScreen(name='sizes'))
         self.clothes_sm.add_widget(ClothesOrdersScreen(name='orders'))
         self.clothes_sm.add_widget(ClothesStatusScreen(name='status'))
         self.clothes_sm.add_widget(ClothesReportsScreen(name='reports'))
+        self.clothes_sm.current = 'sizes'
         container.add_widget(self.clothes_sm)
         self.sc_ref["clothes"].add_widget(container)
+        try:
+            scr = self.clothes_sm.get_screen('sizes')
+            if hasattr(scr, 'build_ui'):
+                scr.build_ui()
+            if hasattr(scr, 'refresh'):
+                scr.refresh()
+        except:
+            pass
 
     def setup_table_ui(self):
         self.sc_ref["table"].clear_widgets()
