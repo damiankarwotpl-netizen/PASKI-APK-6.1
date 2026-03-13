@@ -6,7 +6,6 @@ import smtplib
 import mimetypes
 import time
 import random
-import csv
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -154,7 +153,6 @@ class FutureApp(App):
         self.ti_tab_search = ModernInput(hint_text="Szukaj w tabeli..."); self.ti_tab_search.bind(text=self.filter_table)
         menu.add_widget(self.ti_tab_search)
         menu.add_widget(Button(text="KOLUMNY", size_hint_x=0.2, on_press=self.popup_columns))
-        menu.add_widget(Button(text="EXPORT CSV", size_hint_x=0.2, on_press=self.export_all_rows))
         menu.add_widget(Button(text="WRÓĆ", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
         hs = ScrollView(size_hint_y=None, height=dp(55), do_scroll_y=False)
         self.table_header_layout = GridLayout(rows=1, size_hint=(None, None), height=dp(55))
@@ -232,6 +230,7 @@ class FutureApp(App):
         self.cb_auto.bind(active=self.on_auto_checkbox_changed)
         ab.add_widget(self.cb_auto); ab.add_widget(Label(text="AUTOMATYCZNA WYSYŁKA", bold=True)); l.add_widget(ab)
         self.lbl_stats = Label(text="Baza: 0", height=dp(30)); l.add_widget(self.lbl_stats)
+        self.lbl_attach_count = Label(text=f"Załączników: {len(self.global_attachments)}", height=dp(25)); l.add_widget(self.lbl_attach_count)
         l.add_widget(ModernButton(text="WYCZYŚĆ ZAŁĄCZNIKI", on_press=self.clear_all_attachments, height=dp(45), size_hint_y=None, bg_color=(0.7, 0.1, 0.1, 1)))
         self.pb_label = Label(text="Gotowy", height=dp(25)); self.pb = ProgressBar(max=100, height=dp(20)); l.add_widget(self.pb_label); l.add_widget(self.pb)
         btns = [("EDYTUJ SZABLON", lambda x: setattr(self.sm, 'current', 'tmpl')), ("DODAJ ZAŁĄCZNIK", lambda x: self.open_picker("attachment")), ("WYŚLIJ JEDEN PLIK", self.start_special_send_flow), ("START MASOWA WYSYŁKA", self.start_mass_mailing)]
@@ -515,6 +514,11 @@ class FutureApp(App):
     def update_stats(self, *a):
         try: self.lbl_stats.text = f"Baza: {self.conn.execute('SELECT count(*) FROM contacts').fetchone()[0]} | Załączniki: {len(self.global_attachments)}"
         except: pass
+        try:
+            if hasattr(self, 'lbl_attach_count'):
+                self.lbl_attach_count.text = f"Załączników: {len(self.global_attachments)}"
+        except:
+            pass
 
     def update_progress(self, d):
         try:
@@ -567,22 +571,6 @@ class FutureApp(App):
         ws.append([self.full_data[0][k] for k in self.export_indices]); ws.append([str(r[k]) if (k < len(r) and str(r[k]).strip() != "") else "0" for k in self.export_indices])
         self.style_xlsx(ws); wb.save(p/f"Raport_{nx}_{sx}.xlsx"); self.msg("OK", f"Zapisano PDF dla: {nx}"); self.log(f"Export single row for {nx} {sx}")
 
-    def export_all_rows(self, _=None):
-        if not self.filtered_data: return self.msg("!", "Brak danych do eksportu")
-        p = Path("/storage/emulated/0/Documents/FutureExport") if platform=="android" else Path("./exports"); p.mkdir(parents=True, exist_ok=True)
-        fname = p / f"Raport_All_v16_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        try:
-            with open(fname, "w", newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow([self.full_data[0][k] for k in self.export_indices])
-                for r in self.filtered_data[1:]:
-                    writer.writerow([str(r[k]) if (k < len(r) and str(r[k]).strip() != "") else "" for k in self.export_indices])
-            self.msg("OK", f"Zapisano CSV: {fname.name}")
-            self.log(f"Exported CSV: {fname}")
-        except Exception:
-            self.log(f"export_all_rows error: {traceback.format_exc()}")
-            self.msg("Błąd", "Nie udało się zapisać CSV")
-
     def delete_contact(self, n, s):
         def pr(_): [self.conn.execute("DELETE FROM contacts WHERE name=? AND surname=?", (n, s)), self.conn.commit(), px.dismiss(), self.refresh_contacts_list(), self.update_stats()]
         px = Popup(title="Usuń?", content=Button(text="USUŃ KONTAKT", on_press=pr, background_color=(1,0,0,1)), size_hint=(0.7,0.3)); px.open()
@@ -621,6 +609,7 @@ class FutureApp(App):
         self.cb_paski_auto.bind(active=self.on_auto_checkbox_changed)
         ab.add_widget(self.cb_paski_auto); ab.add_widget(Label(text="AUTOMATYCZNA WYSYŁKA", bold=True))
         l.add_widget(ab)
+        self.lbl_attach_count_paski = Label(text=f"Załączników: {len(self.global_attachments)}", height=dp(25)); l.add_widget(self.lbl_attach_count_paski)
         self.pb_label_paski = Label(text="Gotowy", height=dp(25)); self.pb_paski = ProgressBar(max=100, height=dp(20)); l.add_widget(self.pb_label_paski); l.add_widget(self.pb_paski)
         l.add_widget(ModernButton(text="Wczytaj arkusz płac", on_press=lambda x: self.open_picker("data"), height=dp(50), size_hint_y=None))
         l.add_widget(ModernButton(text="Podgląd i eksport", on_press=lambda x: [self.refresh_table(), setattr(self.sm, 'current', 'table')] if self.full_data else self.msg("!", "Wczytaj arkusz!"), height=dp(50), size_hint_y=None))
