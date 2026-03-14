@@ -1668,68 +1668,6 @@ class FutureApp(App):
             self.msg("Błąd", "Nie można otworzyć logów")
 
 
-# ==========================================
-# MEGA PATCH UI - ROZMIARY PRACOWNIKÓW
-# ==========================================
-
-def build_worker_sizes_card(name, plant, k, b, s, kur, but, edit_cb=None, delete_cb=None):
-
-    card = BoxLayout(
-        orientation="vertical",
-        padding=dp(10),
-        spacing=dp(6),
-        size_hint_y=None
-    )
-    card.bind(minimum_height=card.setter("height"))
-
-    title = Label(
-        text=f"[b]{name}[/b]",
-        markup=True,
-        font_size="18sp",
-        size_hint_y=None,
-        height=dp(30),
-        halign="left",
-        valign="middle"
-    )
-    title.bind(size=title.setter("text_size"))
-
-    plant_lbl = Label(
-        text=f"{plant}",
-        size_hint_y=None,
-        height=dp(22),
-        halign="left",
-        valign="middle"
-    )
-    plant_lbl.bind(size=plant_lbl.setter("text_size"))
-
-    sizes_text = (
-        f"Koszulka: {k}\n"
-        f"Bluza: {b}\n"
-        f"Spodnie: {s}\n"
-        f"Kurtka: {kur}\n"
-        f"Buty: {but}"
-    )
-
-    sizes_lbl = Label(
-        text=sizes_text,
-        size_hint_y=None,
-        halign="left",
-        valign="top"
-    )
-
-    sizes_lbl.bind(
-        width=lambda s, w: setattr(s, "text_size", (w, None)),
-        texture_size=lambda s, t: setattr(s, "height", t[1])
-    )
-
-    btns = BoxLayout(
-        size_hint_y=None,
-        height=dp(42),
-        spacing=dp(10)
-    )
-
-    edit_btn = ModernButton(text="Edytuj")
-    del_btn = ModernButton(text="Usuń")
 
     if edit_cb:
         edit_btn.bind(on_press=edit_cb)
@@ -1747,229 +1685,253 @@ def build_worker_sizes_card(name, plant, k, b, s, kur, but, edit_cb=None, delete
 
     return card
 
+# =====================================================
+# FUTURE ULTRA MEGA PATCH – MODUŁ UBRANIA ENTERPRISE
+# =====================================================
 
-# ===============================
-# WYSZUKIWARKA
-# ===============================
+def future_init_clothes_db(self):
 
-def build_sizes_search_bar(app, refresh_callback):
+    conn = sqlite3.connect(self.db_path)
+    c = conn.cursor()
 
-    box = BoxLayout(
-        size_hint_y=None,
-        height=dp(50),
-        padding=dp(6)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS clothes_sizes(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        zaklad TEXT,
+        koszulka TEXT,
+        bluza TEXT,
+        spodnie TEXT,
+        kurtka TEXT,
+        buty TEXT
     )
+    """)
 
-    search = TextInput(
-        hint_text="🔎 Szukaj pracownika...",
-        multiline=False
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS clothes_history(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        worker TEXT,
+        zaklad TEXT,
+        item TEXT,
+        size TEXT,
+        date TEXT
     )
+    """)
 
-    def on_text(instance, value):
-        app._sizes_filter = value.lower()
-        refresh_callback()
-
-    search.bind(text=on_text)
-
-    box.add_widget(search)
-
-    return box
+    conn.commit()
+    conn.close()
 
 
-# ===============================
-# FILTROWANIE
-# ===============================
+# =====================================================
+# WYŚWIETLANIE ROZMIARÓW – NAPRAWIONE
+# =====================================================
 
-def filter_workers_list(rows, app):
+def refresh_sizes_list(self):
 
-    q = getattr(app, "_sizes_filter", "")
-
-    if not q:
-        return rows
-
-    out = []
-
-    for r in rows:
-        txt = " ".join([str(x) for x in r]).lower()
-
-        if q in txt:
-            out.append(r)
-
-    return out
-
-
-# ===============================
-# SORTOWANIE
-# ===============================
-
-def sort_workers_by_plant(rows):
-
-    try:
-        return sorted(rows, key=lambda r: (r[3], r[1]))
-    except:
-        return rows
-
-
-# ===============================
-# SEPARATOR
-# ===============================
-
-def add_separator(container):
-
-    sep = Label(
-        text="",
-        size_hint_y=None,
-        height=dp(12)
-    )
-
-    container.add_widget(sep)
-
-
-# ===============================
-# NAGŁÓWEK ZAKŁADU
-# ===============================
-
-def add_plant_header(container, plant):
-
-    header = Label(
-        text=f"[b]{plant}[/b]",
-        markup=True,
-        font_size="20sp",
-        size_hint_y=None,
-        height=dp(36),
-        halign="left",
-        valign="middle"
-    )
-
-    header.bind(size=header.setter("text_size"))
-
-    container.add_widget(header)
-
-
-# ===============================
-# BUDOWANIE LISTY ROZMIARÓW
-# ===============================
-
-def build_sizes_list(app, container, rows, edit_cb=None, delete_cb=None):
-
+    container = self.sizes_list
     container.clear_widgets()
 
-    rows = sort_workers_by_plant(rows)
-    rows = filter_workers_list(rows, app)
+    conn = sqlite3.connect(self.db_path)
+    cur = conn.cursor()
 
-    last_plant = None
+    cur.execute("""
+    SELECT id,name,zaklad,koszulka,bluza,spodnie,kurtka,buty
+    FROM clothes_sizes
+    ORDER BY name
+    """)
 
-    for r in rows:
+    rows = cur.fetchall()
+    conn.close()
 
-        try:
+    for row in rows:
 
-            worker_id = r[0]
-            name = r[1]
-            plant = r[2]
+        pid,name,zaklad,k,b,s,ku,but = row
 
-            k = r[3]
-            b = r[4]
-            s = r[5]
-            kur = r[6]
-            but = r[7]
-
-        except:
-            continue
-
-        if plant != last_plant:
-
-            add_separator(container)
-            add_plant_header(container, plant)
-            add_separator(container)
-
-            last_plant = plant
-
-        card = build_worker_sizes_card(
-            name,
-            plant,
-            k,
-            b,
-            s,
-            kur,
-            but,
-            edit_cb=lambda x, wid=worker_id: edit_cb(wid) if edit_cb else None,
-            delete_cb=lambda x, wid=worker_id: delete_cb(wid) if delete_cb else None
+        main = BoxLayout(
+            orientation="horizontal",
+            size_hint_y=None,
+            height=dp(150),
+            padding=dp(10),
+            spacing=dp(10)
         )
 
-        container.add_widget(card)
-        add_separator(container)
+        left = BoxLayout(
+            orientation="vertical",
+            size_hint_x=.75
+        )
 
-# ==========================================
-# AUTO PATCH - CZYTELNE ROZMIARY
-# ==========================================
+        title = Label(
+            text=f"[b]{name}[/b] ({zaklad})",
+            markup=True,
+            halign="left"
+        )
 
-def format_worker_sizes(text):
-
-    try:
-
-        parts = text.split(" ")
-
-        name = parts[0] + " " + parts[1]
-
-        plant = ""
-        if "(" in text and ")" in text:
-            plant = text.split("(")[1].split(")")[0]
-
-        k = ""
-        b = ""
-        s = ""
-        kur = ""
-        but = ""
-
-        for p in parts:
-
-            if p.startswith("K:"):
-                k = p.replace("K:", "")
-
-            if p.startswith("B:"):
-                b = p.replace("B:", "")
-
-            if p.startswith("S:"):
-                s = p.replace("S:", "")
-
-            if p.startswith("KUR:"):
-                kur = p.replace("KUR:", "")
-
-            if p.startswith("BUT:"):
-                but = p.replace("BUT:", "")
-
-        new_text = (
-            f"{name}\n"
-            f"{plant}\n\n"
+        sizes = Label(
+            text=
             f"Koszulka: {k}\n"
             f"Bluza: {b}\n"
             f"Spodnie: {s}\n"
-            f"Kurtka: {kur}\n"
-            f"Buty: {but}"
+            f"Kurtka: {ku}\n"
+            f"Buty: {but}",
+            halign="left",
+            valign="top"
         )
 
-        return new_text
+        left.add_widget(title)
+        left.add_widget(sizes)
 
-    except:
-        return text
+        right = BoxLayout(
+            orientation="vertical",
+            size_hint_x=.25,
+            spacing=dp(6)
+        )
+
+        btn_edit = ModernButton(
+            text="Edytuj",
+            size_hint_y=None,
+            height=dp(45)
+        )
+
+        btn_delete = ModernButton(
+            text="Usuń",
+            size_hint_y=None,
+            height=dp(45),
+            bg_color=(0.8,0.1,0.1,1)
+        )
+
+        btn_issue = ModernButton(
+            text="Wydaj",
+            size_hint_y=None,
+            height=dp(45),
+            bg_color=(0.1,0.6,0.3,1)
+        )
+
+        btn_edit.bind(on_press=lambda x,pid=pid: self.edit_size(pid))
+        btn_delete.bind(on_press=lambda x,pid=pid: self.delete_size(pid))
+        btn_issue.bind(on_press=lambda x,pid=pid: self.issue_clothes(pid))
+
+        right.add_widget(btn_edit)
+        right.add_widget(btn_issue)
+        right.add_widget(btn_delete)
+
+        main.add_widget(left)
+        main.add_widget(right)
+
+        container.add_widget(main)
 
 
-# patch Label aby automatycznie formatował rozmiary
+# =====================================================
+# WYDAWANIE UBRAŃ
+# =====================================================
 
-from kivy.uix.label import Label as KivyLabel
+def issue_clothes(self,pid):
 
-_old_label_init = KivyLabel.__init__
+    conn = sqlite3.connect(self.db_path)
+    c = conn.cursor()
 
-def _patched_label_init(self, *args, **kwargs):
+    c.execute("""
+    SELECT name,zaklad,koszulka,bluza,spodnie,kurtka,buty
+    FROM clothes_sizes
+    WHERE id=?
+    """,(pid,))
 
-    txt = kwargs.get("text", "")
+    row = c.fetchone()
 
-    if "K:" in txt and "BUT:" in txt:
-        kwargs["text"] = format_worker_sizes(txt)
+    if not row:
+        conn.close()
+        return
 
-    _old_label_init(self, *args, **kwargs)
+    name,zaklad,k,b,s,ku,but = row
 
-KivyLabel.__init__ = _patched_label_init
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    data = [
+        ("Koszulka",k),
+        ("Bluza",b),
+        ("Spodnie",s),
+        ("Kurtka",ku),
+        ("Buty",but)
+    ]
+
+    for item,size in data:
+
+        c.execute("""
+        INSERT INTO clothes_history(worker,zaklad,item,size,date)
+        VALUES(?,?,?,?,?)
+        """,(name,zaklad,item,size,today))
+
+    conn.commit()
+    conn.close()
+
+    self.msg("OK","Ubrania wydane")
+
+
+# =====================================================
+# STATYSTYKI PRACOWNIKA
+# =====================================================
+
+def clothes_stats(self,worker):
+
+    conn = sqlite3.connect(self.db_path)
+    c = conn.cursor()
+
+    c.execute("""
+    SELECT item,COUNT(*),MAX(date)
+    FROM clothes_history
+    WHERE worker=?
+    GROUP BY item
+    """,(worker,))
+
+    rows = c.fetchall()
+    conn.close()
+
+    txt=""
+
+    for item,count,last in rows:
+
+        txt+=f"{item}: {count} szt\n"
+        txt+=f"Ostatnio: {last}\n\n"
+
+    self.msg("Statystyki",txt)
+
+
+# =====================================================
+# RAPORT SYSTEMU UBRAŃ
+# =====================================================
+
+def clothes_report(self):
+
+    conn = sqlite3.connect(self.db_path)
+    c = conn.cursor()
+
+    c.execute("""
+    SELECT worker,item,COUNT(*)
+    FROM clothes_history
+    GROUP BY worker,item
+    ORDER BY worker
+    """)
+
+    rows=c.fetchall()
+    conn.close()
+
+    report=""
+
+    for w,i,cnt in rows:
+
+        report+=f"{w} - {i}: {cnt}\n"
+
+    self.msg("Raport ubrań",report)
+
+
+# =====================================================
+# AUTO PODPIĘCIE PATCHA
+# =====================================================
+
+FutureApp.future_init_clothes_db = future_init_clothes_db
+FutureApp.refresh_sizes_list = refresh_sizes_list
+FutureApp.issue_clothes = issue_clothes
+FutureApp.clothes_stats = clothes_stats
+FutureApp.clothes_report = clothes_report
 
 if __name__ == "__main__":
     FutureApp().run()
