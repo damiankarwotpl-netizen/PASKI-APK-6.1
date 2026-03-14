@@ -1899,6 +1899,78 @@ def build_sizes_list(app, container, rows, edit_cb=None, delete_cb=None):
         container.add_widget(card)
         add_separator(container)
 
+# ==========================================
+# AUTO PATCH - CZYTELNE ROZMIARY
+# ==========================================
+
+def format_worker_sizes(text):
+
+    try:
+
+        parts = text.split(" ")
+
+        name = parts[0] + " " + parts[1]
+
+        plant = ""
+        if "(" in text and ")" in text:
+            plant = text.split("(")[1].split(")")[0]
+
+        k = ""
+        b = ""
+        s = ""
+        kur = ""
+        but = ""
+
+        for p in parts:
+
+            if p.startswith("K:"):
+                k = p.replace("K:", "")
+
+            if p.startswith("B:"):
+                b = p.replace("B:", "")
+
+            if p.startswith("S:"):
+                s = p.replace("S:", "")
+
+            if p.startswith("KUR:"):
+                kur = p.replace("KUR:", "")
+
+            if p.startswith("BUT:"):
+                but = p.replace("BUT:", "")
+
+        new_text = (
+            f"{name}\n"
+            f"{plant}\n\n"
+            f"Koszulka: {k}\n"
+            f"Bluza: {b}\n"
+            f"Spodnie: {s}\n"
+            f"Kurtka: {kur}\n"
+            f"Buty: {but}"
+        )
+
+        return new_text
+
+    except:
+        return text
+
+
+# patch Label aby automatycznie formatował rozmiary
+
+from kivy.uix.label import Label as KivyLabel
+
+_old_label_init = KivyLabel.__init__
+
+def _patched_label_init(self, *args, **kwargs):
+
+    txt = kwargs.get("text", "")
+
+    if "K:" in txt and "BUT:" in txt:
+        kwargs["text"] = format_worker_sizes(txt)
+
+    _old_label_init(self, *args, **kwargs)
+
+KivyLabel.__init__ = _patched_label_init
+
 if __name__ == "__main__":
     FutureApp().run()
 
