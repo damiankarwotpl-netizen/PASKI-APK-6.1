@@ -1667,6 +1667,238 @@ class FutureApp(App):
             self.log(f"show_logs error: {traceback.format_exc()}")
             self.msg("Błąd", "Nie można otworzyć logów")
 
+
+# ==========================================
+# MEGA PATCH UI - ROZMIARY PRACOWNIKÓW
+# ==========================================
+
+def build_worker_sizes_card(name, plant, k, b, s, kur, but, edit_cb=None, delete_cb=None):
+
+    card = BoxLayout(
+        orientation="vertical",
+        padding=dp(10),
+        spacing=dp(6),
+        size_hint_y=None
+    )
+    card.bind(minimum_height=card.setter("height"))
+
+    title = Label(
+        text=f"[b]{name}[/b]",
+        markup=True,
+        font_size="18sp",
+        size_hint_y=None,
+        height=dp(30),
+        halign="left",
+        valign="middle"
+    )
+    title.bind(size=title.setter("text_size"))
+
+    plant_lbl = Label(
+        text=f"{plant}",
+        size_hint_y=None,
+        height=dp(22),
+        halign="left",
+        valign="middle"
+    )
+    plant_lbl.bind(size=plant_lbl.setter("text_size"))
+
+    sizes_text = (
+        f"Koszulka: {k}\n"
+        f"Bluza: {b}\n"
+        f"Spodnie: {s}\n"
+        f"Kurtka: {kur}\n"
+        f"Buty: {but}"
+    )
+
+    sizes_lbl = Label(
+        text=sizes_text,
+        size_hint_y=None,
+        halign="left",
+        valign="top"
+    )
+
+    sizes_lbl.bind(
+        width=lambda s, w: setattr(s, "text_size", (w, None)),
+        texture_size=lambda s, t: setattr(s, "height", t[1])
+    )
+
+    btns = BoxLayout(
+        size_hint_y=None,
+        height=dp(42),
+        spacing=dp(10)
+    )
+
+    edit_btn = ModernButton(text="Edytuj")
+    del_btn = ModernButton(text="Usuń")
+
+    if edit_cb:
+        edit_btn.bind(on_press=edit_cb)
+
+    if delete_cb:
+        del_btn.bind(on_press=delete_cb)
+
+    btns.add_widget(edit_btn)
+    btns.add_widget(del_btn)
+
+    card.add_widget(title)
+    card.add_widget(plant_lbl)
+    card.add_widget(sizes_lbl)
+    card.add_widget(btns)
+
+    return card
+
+
+# ===============================
+# WYSZUKIWARKA
+# ===============================
+
+def build_sizes_search_bar(app, refresh_callback):
+
+    box = BoxLayout(
+        size_hint_y=None,
+        height=dp(50),
+        padding=dp(6)
+    )
+
+    search = TextInput(
+        hint_text="🔎 Szukaj pracownika...",
+        multiline=False
+    )
+
+    def on_text(instance, value):
+        app._sizes_filter = value.lower()
+        refresh_callback()
+
+    search.bind(text=on_text)
+
+    box.add_widget(search)
+
+    return box
+
+
+# ===============================
+# FILTROWANIE
+# ===============================
+
+def filter_workers_list(rows, app):
+
+    q = getattr(app, "_sizes_filter", "")
+
+    if not q:
+        return rows
+
+    out = []
+
+    for r in rows:
+        txt = " ".join([str(x) for x in r]).lower()
+
+        if q in txt:
+            out.append(r)
+
+    return out
+
+
+# ===============================
+# SORTOWANIE
+# ===============================
+
+def sort_workers_by_plant(rows):
+
+    try:
+        return sorted(rows, key=lambda r: (r[3], r[1]))
+    except:
+        return rows
+
+
+# ===============================
+# SEPARATOR
+# ===============================
+
+def add_separator(container):
+
+    sep = Label(
+        text="",
+        size_hint_y=None,
+        height=dp(12)
+    )
+
+    container.add_widget(sep)
+
+
+# ===============================
+# NAGŁÓWEK ZAKŁADU
+# ===============================
+
+def add_plant_header(container, plant):
+
+    header = Label(
+        text=f"[b]{plant}[/b]",
+        markup=True,
+        font_size="20sp",
+        size_hint_y=None,
+        height=dp(36),
+        halign="left",
+        valign="middle"
+    )
+
+    header.bind(size=header.setter("text_size"))
+
+    container.add_widget(header)
+
+
+# ===============================
+# BUDOWANIE LISTY ROZMIARÓW
+# ===============================
+
+def build_sizes_list(app, container, rows, edit_cb=None, delete_cb=None):
+
+    container.clear_widgets()
+
+    rows = sort_workers_by_plant(rows)
+    rows = filter_workers_list(rows, app)
+
+    last_plant = None
+
+    for r in rows:
+
+        try:
+
+            worker_id = r[0]
+            name = r[1]
+            plant = r[2]
+
+            k = r[3]
+            b = r[4]
+            s = r[5]
+            kur = r[6]
+            but = r[7]
+
+        except:
+            continue
+
+        if plant != last_plant:
+
+            add_separator(container)
+            add_plant_header(container, plant)
+            add_separator(container)
+
+            last_plant = plant
+
+        card = build_worker_sizes_card(
+            name,
+            plant,
+            k,
+            b,
+            s,
+            kur,
+            but,
+            edit_cb=lambda x, wid=worker_id: edit_cb(wid) if edit_cb else None,
+            delete_cb=lambda x, wid=worker_id: delete_cb(wid) if delete_cb else None
+        )
+
+        container.add_widget(card)
+        add_separator(container)
+
 if __name__ == "__main__":
     FutureApp().run()
 
