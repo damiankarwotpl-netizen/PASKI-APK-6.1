@@ -1669,3 +1669,181 @@ class FutureApp(App):
 
 if __name__ == "__main__":
     FutureApp().run()
+
+# ==========================================
+# FUTURE ULTIMATE DEBUG SYSTEM
+# WKLEJ NA SAM KONIEC main.py
+# ==========================================
+
+import sys
+import os
+import traceback
+import threading
+import platform
+from datetime import datetime
+
+
+# -------- PATH --------
+
+def _future_docs():
+
+    try:
+        from android.storage import primary_external_storage_path
+        base = primary_external_storage_path()
+        path = os.path.join(base, "Documents")
+    except:
+        path = os.getcwd()
+
+    try:
+        os.makedirs(path, exist_ok=True)
+    except:
+        pass
+
+    return path
+
+
+# -------- LOG WRITE --------
+
+def _future_log(text):
+
+    try:
+        logfile = os.path.join(_future_docs(), "future_ultimate_log.txt")
+
+        with open(logfile, "a", encoding="utf-8") as f:
+            f.write(text + "\n")
+
+    except:
+        pass
+
+
+# -------- APP START --------
+
+def _future_log_start():
+
+    try:
+
+        _future_log("\n==============================")
+        _future_log("APP START")
+        _future_log(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+        _future_log("Python: " + platform.python_version())
+        _future_log("Platform: " + platform.platform())
+
+        try:
+            import android
+            _future_log("Android detected")
+        except:
+            _future_log("Android: no")
+
+        try:
+            from kivy import __version__
+            _future_log("Kivy: " + __version__)
+        except:
+            pass
+
+        _future_log("==============================\n")
+
+    except:
+        pass
+
+
+# -------- CRASH LOGGER --------
+
+def _future_crash(exc_type, exc_value, exc_traceback):
+
+    try:
+
+        _future_log("\n************ CRASH ************")
+        _future_log(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+        tb = "".join(traceback.format_exception(
+            exc_type,
+            exc_value,
+            exc_traceback
+        ))
+
+        _future_log(tb)
+
+        _future_log("************ END CRASH ************\n")
+
+    except:
+        pass
+
+
+sys.excepthook = _future_crash
+
+
+# -------- THREAD ERROR LOGGER --------
+
+def _future_thread_exception(args):
+
+    try:
+
+        _future_log("\n******** THREAD CRASH ********")
+        _future_log(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+        tb = "".join(traceback.format_exception(
+            args.exc_type,
+            args.exc_value,
+            args.exc_traceback
+        ))
+
+        _future_log(tb)
+
+        _future_log("******** END THREAD CRASH ********\n")
+
+    except:
+        pass
+
+
+try:
+    threading.excepthook = _future_thread_exception
+except:
+    pass
+
+
+# -------- SQLITE LOGGER --------
+
+try:
+    import sqlite3
+
+    _orig_execute = sqlite3.Cursor.execute
+
+    def _future_sql_execute(self, *args, **kwargs):
+
+        try:
+            return _orig_execute(self, *args, **kwargs)
+
+        except Exception as e:
+
+            try:
+                _future_log("\nSQL ERROR:")
+                _future_log(str(e))
+                _future_log("QUERY: " + str(args))
+            except:
+                pass
+
+            raise
+
+    sqlite3.Cursor.execute = _future_sql_execute
+
+except:
+    pass
+
+
+# -------- SCREEN MARKER --------
+
+def FUTURE_SCREEN(name):
+    try:
+        _future_log("SCREEN: " + str(name))
+    except:
+        pass
+
+
+# -------- START LOGGER --------
+
+_future_log_start()
+
+print("FUTURE ULTIMATE DEBUG ACTIVE")
+
+
