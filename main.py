@@ -43,8 +43,6 @@ class ModernButton(Button):
     def __init__(self, bg_color=COLOR_PRIMARY, **kwargs):
         super().__init__(**kwargs)
         self._bg_color = bg_color
-        self._normal_bg_color = bg_color
-        self._pressed_bg_color = tuple(max(0.0, c * 0.82) for c in bg_color[:3]) + (bg_color[3],)
         self.background_normal = ""
         self.background_down = ""
         self.background_color = (0, 0, 0, 0)
