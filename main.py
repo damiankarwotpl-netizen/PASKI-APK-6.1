@@ -1,5 +1,6 @@
 import os
 import json
+import csv
 import sqlite3
 import threading
 import smtplib
@@ -41,16 +42,21 @@ COLOR_HEADER = (0.1, 0.2, 0.35, 1)
 class ModernButton(Button):
     def __init__(self, bg_color=COLOR_PRIMARY, **kwargs):
         super().__init__(**kwargs)
+        self._bg_color = bg_color
         self.background_normal = ""
         self.background_color = (0,0,0,0)
         self.color = COLOR_TEXT
         self.bold, self.radius = True, [dp(12)]
         with self.canvas.before:
-            Color(*bg_color)
+            self.bg_instruction = Color(*bg_color)
             self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=self.radius)
         self.bind(pos=self._update, size=self._update)
     def _update(self, *args):
         self.rect.pos, self.rect.size = self.pos, self.size
+
+    def set_bg_color(self, rgba):
+        self._bg_color = rgba
+        self.bg_instruction.rgba = rgba
 
 class ModernInput(TextInput):
     def __init__(self, **kwargs):
@@ -154,12 +160,32 @@ class ClothesOrdersScreen(Screen):
 
     def refresh(self):
         self.list_layout.clear_widgets()
-        rows = App.get_running_app().conn.execute(""""
+        rows = App.get_running_app().conn.execute("""
         SELECT id,date,plant,status FROM clothes_orders ORDER BY id DESC
         """).fetchall()
+        if not rows:
+            self.list_layout.add_widget(Label(text="Brak zamówień. Utwórz pierwsze zamówienie.", size_hint_y=None, height=dp(60)))
+            return
+
+        status_color_map = {
+            "Do zamówienia": (0.95, 0.7, 0.2, 1),
+            "Zamówione": (0.2, 0.8, 0.45, 1),
+        }
         for r in rows:
-            box = BoxLayout(size_hint_y=None, height=dp(90), padding=dp(6), spacing=dp(8))
-            lbl = Label(text=f"#{r[0]}  {r[1]}  {r[2]}  [{r[3]}]", size_hint_x=0.55, halign='left', valign='middle')
+            box = BoxLayout(size_hint_y=None, height=dp(96), padding=dp(8), spacing=dp(8))
+            with box.canvas.before:
+                Color(*COLOR_CARD)
+                box.bg_rect = RoundedRectangle(pos=box.pos, size=box.size, radius=[dp(10)])
+            box.bind(pos=lambda inst, val: setattr(inst.bg_rect, 'pos', val), size=lambda inst, val: setattr(inst.bg_rect, 'size', val))
+
+            status_color = status_color_map.get(r[3], COLOR_TEXT)
+            lbl = Label(
+                text=f"[b]#{r[0]}[/b]  {r[1]}\n{r[2]}  [color=#{int(status_color[0]*255):02x}{int(status_color[1]*255):02x}{int(status_color[2]*255):02x}][{r[3]}][/color]",
+                markup=True,
+                size_hint_x=0.55,
+                halign='left',
+                valign='middle',
+            )
             lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(12), None)))
 
             actions = BoxLayout(size_hint_x=0.45, spacing=dp(6))
@@ -184,6 +210,7 @@ class ClothesStatusScreen(Screen):
         except:
             pass
         root = BoxLayout(orientation='vertical')
+        root.add_widget(Label(text="Status zamówień", bold=True, size_hint_y=None, height=dp(48)))
         sc = ScrollView()
         self.list_layout = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=dp(6))
         self.list_layout.bind(minimum_height=self.list_layout.setter('height'))
@@ -194,13 +221,16 @@ class ClothesStatusScreen(Screen):
 
     def refresh(self):
         self.list_layout.clear_widgets()
-        rows = App.get_running_app().conn.execute(""""
+        rows = App.get_running_app().conn.execute("""
         SELECT id,date,plant,status FROM clothes_orders ORDER BY id DESC
         """).fetchall()
+        if not rows:
+            self.list_layout.add_widget(Label(text="Brak zamówień do wyświetlenia.", size_hint_y=None, height=dp(50)))
+            return
         for r in rows:
             box = BoxLayout(size_hint_y=None,height=dp(70), padding=dp(6))
             box.add_widget(Label(text=f"Zamówienie #{r[0]}  {r[2]}  {r[3]}"))
-            box.add_widget(ModernButton(text="Zmień", size_hint_x=0.25, on_press=lambda x,i=r[0]: App.get_running_app().mark_order_ordered(i)))\
+            box.add_widget(ModernButton(text="Zmień", size_hint_x=0.25, on_press=lambda x,i=r[0]: App.get_running_app().mark_order_ordered(i)))
             self.list_layout.add_widget(box)
 
 class ClothesReportsScreen(Screen):
@@ -229,7 +259,7 @@ class ClothesReportsScreen(Screen):
             App.get_running_app().msg("Brak biblioteki", "Brak reportlab - PDF niedostępny")
             return
         db = App.get_running_app()
-        rows = db.conn.execute(""""
+        rows = db.conn.execute("""
         SELECT ch.worker_id, w.name, w.surname, ch.item, COUNT(*) as cnt
         FROM clothes_history ch
         LEFT JOIN workers w ON w.id=ch.worker_id
@@ -255,6 +285,16 @@ class ClothesReportsScreen(Screen):
 # ==========================================
 
 class FutureApp(App):
+    REQUIRED_CONTACT_COLUMNS = (
+        ("workplace", "TEXT"),
+        ("apartment", "TEXT"),
+        ("plant", "TEXT"),
+        ("hire_date", "TEXT"),
+        ("clothes_size", "TEXT"),
+        ("shoes_size", "TEXT"),
+    )
+    ADMIN_ACCESS_CODE = "p@ssw0rd1991"
+
     def build(self):
         Window.clearcolor = COLOR_BG
         if platform == "android":
@@ -271,18 +311,20 @@ class FutureApp(App):
         self.mailing_paused = False
         self._log_buffer = []
 
-        self.init_db()
         self.log_file = Path(self.user_data_dir) / "future_v20.log"
         try:
             self.log_file.touch(exist_ok=True)
-        except:
-            pass
+        except Exception as exc:
+            print(f"[WARN] Unable to create log file: {exc}")
+
+        self.init_db()
 
         self.sm = ScreenManager(transition=SlideTransition())
         self.add_screens()
         return self.sm
 
     def log(self, txt):
+        """Log events to memory and on-disk file without crashing the UI."""
         try:
             t = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             line = f"[{t}] {txt}\\n"
@@ -291,47 +333,40 @@ class FutureApp(App):
                 self._log_buffer = self._log_buffer[-200:]
             with open(self.log_file, "a", encoding="utf-8") as f:
                 f.write(line)
-        except:
-            pass
+        except Exception as exc:
+            print(f"[WARN] Logging failed: {exc}")
+
+    def _run_db(self, query, params=(), *, commit=False, fetch=False, fetchone=False, silent=False):
+        """Common DB wrapper used to reduce duplicated try/except blocks."""
+        try:
+            cur = self.conn.execute(query, params)
+            if commit:
+                self.conn.commit()
+            if fetchone:
+                return cur.fetchone()
+            if fetch:
+                return cur.fetchall()
+            return cur
+        except sqlite3.Error as exc:
+            self.log(f"DB error: {exc} | SQL={query!r} | params={params!r}")
+            if not silent:
+                self.msg("Błąd bazy danych", str(exc))
+            return None
 
     def _add_column_if_missing(self, table, column, ctype='TEXT'):
-        try:
-            cols = [r[1] for r in self.conn.execute(f"PRAGMA table_info({table})").fetchall()]
-            if column not in cols:
-                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ctype}")
-                self.conn.commit()
-        except Exception:
-            pass
+        cols = self._run_db(f"PRAGMA table_info({table})", fetch=True, silent=True) or []
+        column_names = [r[1] for r in cols]
+        if column not in column_names:
+            self._run_db(f"ALTER TABLE {table} ADD COLUMN {column} {ctype}", commit=True, silent=True)
 
     def patch_contact_extra_fields(self):
-        try:
-            self.conn.execute("ALTER TABLE contacts ADD COLUMN workplace TEXT")
-        except:
-            pass
-        try:
-            self.conn.execute("ALTER TABLE contacts ADD COLUMN apartment TEXT")
-        except:
-            pass
-        self.conn.commit()
+        self._add_column_if_missing("contacts", "workplace", "TEXT")
+        self._add_column_if_missing("contacts", "apartment", "TEXT")
 
     def patch_contacts_database(self):
-        try:
-            self.conn.execute("ALTER TABLE contacts ADD COLUMN plant TEXT")
-        except:
-            pass
-        try:
-            self.conn.execute("ALTER TABLE contacts ADD COLUMN hire_date TEXT")
-        except:
-            pass
-        try:
-            self.conn.execute("ALTER TABLE contacts ADD COLUMN clothes_size TEXT")
-        except:
-            pass
-        try:
-            self.conn.execute("ALTER TABLE contacts ADD COLUMN shoes_size TEXT")
-        except:
-            pass
-        self.conn.execute(""""
+        for col, ctype in self.REQUIRED_CONTACT_COLUMNS:
+            self._add_column_if_missing("contacts", col, ctype)
+        self._run_db("""
         CREATE TABLE IF NOT EXISTS clothes_history(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             worker_id INTEGER,
@@ -341,16 +376,15 @@ class FutureApp(App):
             size TEXT,
             date TEXT
         )
-        """)
-        self.conn.commit()
+        """, commit=True)
 
     def init_db(self):
         db_p = Path(self.user_data_dir) / "future_v20.db"
         self.conn = sqlite3.connect(str(db_p), check_same_thread=False)
-        self.conn.execute("CREATE TABLE IF NOT EXISTS contacts (name TEXT, surname TEXT, email TEXT, pesel TEXT, phone TEXT, PRIMARY KEY(name, surname))")
-        self.conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, val TEXT)")
-        self.conn.execute("CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, ok INTEGER, fail INTEGER, skip INTEGER, auto INTEGER, details TEXT)")
-        self.conn.execute(""""
+        self._run_db("CREATE TABLE IF NOT EXISTS contacts (name TEXT, surname TEXT, email TEXT, pesel TEXT, phone TEXT, PRIMARY KEY(name, surname))")
+        self._run_db("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, val TEXT)")
+        self._run_db("CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, ok INTEGER, fail INTEGER, skip INTEGER, auto INTEGER, details TEXT)")
+        self._run_db("""
         CREATE TABLE IF NOT EXISTS clothes_sizes(
         id INTEGER PRIMARY KEY,
         name TEXT,
@@ -363,7 +397,7 @@ class FutureApp(App):
         shoes TEXT
         )
         """)
-        self.conn.execute(""""
+        self._run_db("""
         CREATE TABLE IF NOT EXISTS clothes_orders(
         id INTEGER PRIMARY KEY,
         date TEXT,
@@ -371,7 +405,7 @@ class FutureApp(App):
         status TEXT
         )
         """)
-        self.conn.execute(""""
+        self._run_db("""
         CREATE TABLE IF NOT EXISTS clothes_order_items(
         id INTEGER PRIMARY KEY,
         order_id INTEGER,
@@ -384,7 +418,7 @@ class FutureApp(App):
         issued INTEGER DEFAULT 0
         )
         """)
-        self.conn.execute(""""
+        self._run_db("""
         CREATE TABLE IF NOT EXISTS clothes_issued(
         id INTEGER PRIMARY KEY,
         name TEXT,
@@ -394,24 +428,14 @@ class FutureApp(App):
         qty INTEGER,
         date TEXT
         )
-        """)
-        self.conn.commit()
-        try:
-            self.patch_contact_extra_fields()
-        except:
-            pass
-        try:
-            self.patch_contacts_database()
-        except:
-            pass
-        try:
-            self.clothes_init()
-        except:
-            pass
+        """, commit=True)
+        self.patch_contact_extra_fields()
+        self.patch_contacts_database()
+        self.clothes_init()
 
     def clothes_init(self):
         c=self.conn.cursor()
-        c.execute(""""
+        c.execute("""
         CREATE TABLE IF NOT EXISTS workers(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT,
@@ -419,7 +443,7 @@ class FutureApp(App):
         plant TEXT
         )
         """)
-        c.execute(""""
+        c.execute("""
         CREATE TABLE IF NOT EXISTS worker_sizes(
         worker_id INTEGER,
         shirt TEXT,
@@ -464,19 +488,25 @@ class FutureApp(App):
             self.msg("Błąd","Nie znaleziono kolumn imię/nazwisko")
             return
         c=self.conn.cursor()
+        inserted = 0
+        skipped = 0
         for _,row in df.iterrows():
             name=row[name_col]
             surname=row[surname_col]
             plant=row[plant_col] if plant_col else ""
             try:
-                c.execute(""""
+                if not str(name).strip() or not str(surname).strip():
+                    skipped += 1
+                    continue
+                c.execute("""
                 INSERT INTO workers(name,surname,plant)
                 VALUES(?,?,?)
                 """,(str(name).strip(),str(surname).strip(),str(plant).strip()))
-            except:
-                pass
+                inserted += 1
+            except sqlite3.Error:
+                skipped += 1
         self.conn.commit()
-        self.msg("OK","Import zakończony")
+        self.msg("OK",f"Import zakończony. Dodano: {inserted}, pominięto: {skipped}")
 
     def clothes_edit_sizes(self,worker_id):
         root=BoxLayout(orientation="vertical",padding=dp(10),spacing=dp(6))
@@ -497,7 +527,7 @@ class FutureApp(App):
                 self.conn.execute("DELETE FROM worker_sizes WHERE worker_id=?", (worker_id,))
             except:
                 pass
-            self.conn.execute(""""
+            self.conn.execute("""
             INSERT INTO worker_sizes(worker_id,shirt,pants,shoes,jacket)
             VALUES(?,?,?,?,?)
             """,(worker_id,shirt.text,pants.text,shoes.text,jacket.text))
@@ -516,7 +546,7 @@ class FutureApp(App):
         workers=[]
         grid=GridLayout(cols=1,size_hint_y=None)
         grid.bind(minimum_height=grid.setter("height"))
-        rows=cur.execute(""""
+        rows=cur.execute("""
         SELECT id,name,surname,plant
         FROM workers
         ORDER BY surname
@@ -544,14 +574,14 @@ class FutureApp(App):
 
     def clothes_create_order(self, worker_ids, items, plant):
         c=self.conn.cursor()
-        c.execute(""""
+        c.execute("""
         INSERT INTO clothes_orders(date,plant,status)
         VALUES(?,?,?)
         """,(datetime.now().strftime("%Y-%m-%d"), plant or "Zakład", "Do zamówienia"))
         order_id=c.lastrowid
         for wid in worker_ids:
             for item in items:
-                c.execute(""""
+                c.execute("""
                 INSERT INTO clothes_order_items(order_id, worker_id, name, surname, item, qty, issued)
                 VALUES(?,?,?,?,?,?,?)
                 """,(order_id, wid, "", "", item.get('name',''), item.get('qty',1), 0))
@@ -561,14 +591,14 @@ class FutureApp(App):
 
     def clothes_count_sizes(self,order_id):
         cur=self.conn.cursor()
-        rows=cur.execute(""""
+        rows=cur.execute("""
         SELECT worker_id,item,qty
         FROM clothes_order_items
         WHERE order_id=?
         """,(order_id,)).fetchall()
         summary=defaultdict(int)
         for wid,item,qty in rows:
-            size=cur.execute(""""
+            size=cur.execute("""
             SELECT shirt,pants,shoes,jacket
             FROM worker_sizes
             WHERE worker_id=?
@@ -617,7 +647,7 @@ class FutureApp(App):
             self.msg("PDF","Brak reportlab.platypus - PDF niedostępny")
             return
         cur=self.conn.cursor()
-        rows=cur.execute(""""
+        rows=cur.execute("""
         SELECT coi.id, w.name, w.surname, coi.item, coi.qty
         FROM clothes_order_items coi
         LEFT JOIN workers w ON w.id=coi.worker_id
@@ -637,14 +667,14 @@ class FutureApp(App):
 
     def clothes_issue_all(self,order_id):
         cur=self.conn.cursor()
-        rows=cur.execute(""""
+        rows=cur.execute("""
         SELECT id, worker_id, item, qty
         FROM clothes_order_items
         WHERE order_id=?
         """,(order_id,)).fetchall()
         for r in rows:
             coi_id, wid, item, qty = r
-            cur.execute(""""
+            cur.execute("""
             INSERT INTO clothes_history(worker_id, name, surname, item, size, date)
             VALUES(?,?,?,?,?,?)
             """,(wid, "", "", item, "", datetime.now().strftime("%Y-%m-%d")))
@@ -659,7 +689,7 @@ class FutureApp(App):
         grid=GridLayout(cols=1,size_hint_y=None)
         grid.bind(minimum_height=grid.setter("height"))
         items=[]
-        rows=cur.execute(""""
+        rows=cur.execute("""
         SELECT c.id,w.name,w.surname,c.item,c.qty
         FROM clothes_order_items c
         LEFT JOIN workers w ON w.id=c.worker_id
@@ -682,7 +712,7 @@ class FutureApp(App):
         def save(_):
             for cid,cb in items:
                 if cb.active:
-                    cur.execute(""""
+                    cur.execute("""
                     INSERT INTO clothes_history(worker_id, item, date)
                     SELECT worker_id, item, ?
                     FROM clothes_order_items
@@ -701,7 +731,7 @@ class FutureApp(App):
             year=datetime.now().year
         root=BoxLayout(orientation="vertical",padding=dp(10),spacing=dp(6))
         cur=self.conn.cursor()
-        worker=cur.execute(""""
+        worker=cur.execute("""
         SELECT name,surname,plant
         FROM workers
         WHERE id=?
@@ -715,12 +745,12 @@ class FutureApp(App):
         grid=GridLayout(cols=1,size_hint_y=None)
         grid.bind(minimum_height=grid.setter("height"))
         for item in clothes:
-            count=cur.execute(""""
+            count=cur.execute("""
             SELECT COUNT(*)
             FROM clothes_history
             WHERE worker_id=? AND item LIKE ? AND strftime('%Y',date)=?
             """,(worker_id,'%'+item+'%',str(year))).fetchone()[0]
-            last=cur.execute(""""
+            last=cur.execute("""
             SELECT date
             FROM clothes_history
             WHERE worker_id=? AND item LIKE ?
@@ -754,7 +784,7 @@ class FutureApp(App):
         grid=GridLayout(cols=1,size_hint_y=None)
         grid.bind(minimum_height=grid.setter("height"))
         cur=self.conn.cursor()
-        rows=cur.execute(""""
+        rows=cur.execute("""
         SELECT id,name,surname,plant
         FROM workers
         ORDER BY surname
@@ -804,8 +834,18 @@ class FutureApp(App):
     def setup_ui_all(self):
         self.sc_ref["home"].clear_widgets()
         root = BoxLayout(orientation="vertical", padding=[dp(10), dp(10), dp(10), dp(80)], spacing=dp(10))
-        lbl = Label(text="FUTURE ULTIMATE v20", font_size='34sp', bold=True, color=COLOR_PRIMARY, size_hint_y=None, height=dp(70))
-        root.add_widget(lbl)
+        header = BoxLayout(size_hint_y=None, height=dp(70), spacing=dp(8))
+        lbl = Label(text="FUTURE ULTIMATE v20", font_size='34sp', bold=True, color=COLOR_PRIMARY)
+        admin_btn = ModernButton(
+            text="ADMIN",
+            size_hint=(None, None),
+            size=(dp(90), dp(36)),
+            bg_color=(0.35, 0.25, 0.7, 1),
+            on_press=lambda x: self.show_admin_access_popup(),
+        )
+        header.add_widget(lbl)
+        header.add_widget(admin_btn)
+        root.add_widget(header)
         sv = ScrollView(size_hint=(1,1))
         grid = GridLayout(cols=2, spacing=dp(12), padding=dp(10), size_hint_y=None)
         grid.bind(minimum_height=grid.setter('height'))
@@ -824,6 +864,30 @@ class FutureApp(App):
         self.setup_email_ui(); self.setup_smtp_ui(); self.setup_tmpl_ui(); self.setup_contacts_ui(); self.setup_report_ui()
         self.setup_cars_ui(); self.setup_paski_ui(); self.setup_pracownicy_ui(); self.setup_zaklady_ui(); self.setup_settings_ui()
         self.setup_clothes_container()
+
+    def show_admin_access_popup(self):
+        content = BoxLayout(orientation='vertical', spacing=dp(8), padding=dp(10))
+        content.add_widget(Label(text="Podaj kod administratora", size_hint_y=None, height=dp(30)))
+        password_input = ModernInput(hint_text="Kod admin", password=True, multiline=False, size_hint_y=None, height=dp(44))
+        content.add_widget(password_input)
+        buttons = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        popup = Popup(title="Dostęp administratora", content=content, size_hint=(0.75, 0.35))
+
+        def close_popup(_):
+            popup.dismiss()
+
+        def verify_code(_):
+            if password_input.text == self.ADMIN_ACCESS_CODE:
+                popup.dismiss()
+                self.sm.current = 'settings'
+                self.msg("Admin", "Dostęp przyznany.")
+            else:
+                self.msg("Błąd", "Nieprawidłowy kod administratora.")
+
+        buttons.add_widget(ModernButton(text="Anuluj", on_press=close_popup, bg_color=(0.4, 0.4, 0.4, 1)))
+        buttons.add_widget(ModernButton(text="Wejdź", on_press=verify_code))
+        content.add_widget(buttons)
+        popup.open()
 
     def setup_clothes_container(self):
         self.sc_ref["clothes"].clear_widgets()
@@ -885,25 +949,31 @@ class FutureApp(App):
         workers_grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(2))
         workers_grid.bind(minimum_height=workers_grid.setter('height'))
         
-        try:
-            rows = self.conn.execute("SELECT id, name, surname, plant FROM clothes_sizes ORDER BY plant ASC, surname ASC").fetchall()
-        except:
-            rows = []
+        rows = self._run_db(
+            "SELECT id, name, surname, plant FROM clothes_sizes ORDER BY plant ASC, surname ASC",
+            fetch=True,
+            silent=True,
+        ) or []
+
+        if not rows:
+            self.msg("Brak danych", "Brak pracowników w bazie rozmiarów. Najpierw dodaj rozmiary.")
+            return
 
         worker_selection_list = []
         last_plant = None
         for r in rows:
-            if r[3] != last_plant:
+            plant_name = (r[3] or "Nieprzypisany zakład").strip()
+            if plant_name != last_plant:
                 # Nagłówek zakładu jako etykieta
-                workers_grid.add_widget(Label(text=f"--- ZAKŁAD: {r[3]} ---", color=(0.1, 0.7, 1, 1), size_hint_y=None, height=dp(30), bold=True))
-                last_plant = r[3]
+                workers_grid.add_widget(Label(text=f"--- ZAKŁAD: {plant_name} ---", color=(0.1, 0.7, 1, 1), size_hint_y=None, height=dp(30), bold=True))
+                last_plant = plant_name
 
             cb = CheckBox(size_hint_x=None, width=dp(40))
             row = BoxLayout(size_hint_y=None, height=dp(40))
             row.add_widget(Label(text=f"{r[1]} {r[2]}", halign='left', size_hint_x=0.8))
             row.add_widget(cb)
             workers_grid.add_widget(row)
-            worker_selection_list.append((r[0], r[3], cb)) # id, plant, checkbox
+            worker_selection_list.append((r[0], plant_name, cb)) # id, plant, checkbox
 
         scroll = ScrollView()
         scroll.add_widget(workers_grid)
@@ -952,8 +1022,8 @@ class FutureApp(App):
             w_box.bind(minimum_height=w_box.setter('height'))
             with w_box.canvas.before:
                 Color(0.15, 0.2, 0.3, 1)
-                self.rect = RoundedRectangle(pos=w_box.pos, size=w_box.size, radius=[dp(8)])
-            w_box.bind(pos=lambda inst, val: setattr(inst, 'rect_pos', val), size=lambda inst, val: setattr(inst, 'rect_size', val))
+                w_box.bg_rect = RoundedRectangle(pos=w_box.pos, size=w_box.size, radius=[dp(8)])
+            w_box.bind(pos=lambda inst, val: setattr(inst.bg_rect, 'pos', val), size=lambda inst, val: setattr(inst.bg_rect, 'size', val))
             
             # Info o pracowniku
             w_box.add_widget(Label(text=f"[b]{w_data[0]} {w_data[1]}[/b] ({w_data[2]})", markup=True, size_hint_y=None, height=dp(30)))
@@ -1001,6 +1071,10 @@ class FutureApp(App):
         p_items.open()
 
     def finalize_complex_order(self, plant_name):
+        if not getattr(self, "_temp_order_data", None):
+            self.msg("Błąd", "Brak danych zamówienia.")
+            return
+
         c = self.conn.cursor()
         now = datetime.now().strftime("%Y-%m-%d")
         
@@ -1017,24 +1091,38 @@ class FutureApp(App):
             'shoes': 'Buty'
         }
 
+        positions_count = 0
         for wid, items_dict in self._temp_order_data.items():
             # Pobierz dane pracownika do zapisu w tabeli items
             w_info = self.conn.execute("SELECT name, surname FROM clothes_sizes WHERE id=?", (wid,)).fetchone()
+            if not w_info:
+                continue
             for key, is_selected in items_dict.items():
                 if is_selected:
-                    c.execute(""""
+                    item_name = items_map.get(key)
+                    if not item_name:
+                        continue
+                    c.execute("""
                         INSERT INTO clothes_order_items(order_id, worker_id, name, surname, item, qty, issued)
                         VALUES(?,?,?,?,?,?,?)
-                    """, (order_id, wid, w_info[0], w_info[1], items_map[key], 1, 0))
-        
+                    """, (order_id, wid, w_info[0], w_info[1], item_name, 1, 0))
+                    positions_count += 1
+
+        if positions_count == 0:
+            self.conn.execute("DELETE FROM clothes_orders WHERE id=?", (order_id,))
+            self.conn.commit()
+            self.msg("Błąd", "Nie wybrano żadnych elementów ubrania.")
+            return
+
         self.conn.commit()
-        self.msg("Sukces", f"Utworzono zamówienie #{order_id}")
-        self.log(f"Created complex order #{order_id}")
+        self.msg("Sukces", f"Utworzono zamówienie #{order_id} ({positions_count} pozycji)")
+        self.log(f"Created complex order #{order_id} with {positions_count} items")
         
         try:
             scr = self.clothes_sm.get_screen('orders')
             scr.refresh()
-        except: pass
+        except Exception as exc:
+            self.log(f"Failed to refresh orders screen: {exc}")
 
     # ==========================================
     # RESZTA ORYGINALNEGO KODU (BEZ ZMIAN)
@@ -1046,7 +1134,7 @@ class FutureApp(App):
         root.add_widget(Label(text=f"Szczegóły zamówienia #{order_id}", bold=True, size_hint_y=None, height=dp(40)))
         grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(6))
         grid.bind(minimum_height=grid.setter('height'))
-        rows = cur.execute(""""
+        rows = cur.execute("""
         SELECT coi.id, coi.worker_id, w.name, w.surname, coi.item, coi.qty, coi.issued
         FROM clothes_order_items coi
         LEFT JOIN workers w ON w.id=coi.worker_id
@@ -1167,28 +1255,31 @@ class FutureApp(App):
         add_popup.open()
 
     def mark_order_ordered(self, order_id):
+        cur = self._run_db("UPDATE clothes_orders SET status='Zamówione' WHERE id=?", (order_id,), commit=True)
+        if cur is None:
+            return
+        if cur.rowcount == 0:
+            self.msg("Błąd", "Nie znaleziono zamówienia do aktualizacji.")
+            return
+        self.msg("OK", "Zmieniono status na 'Zamówione'")
         try:
-            self.conn.execute("UPDATE clothes_orders SET status='Zamówione' WHERE id=?", (order_id,))
-            self.conn.commit()
-            self.msg("OK", "Zmieniono status na 'Zamówione'")
-            try:
-                scr = self.clothes_sm.get_screen('orders')
-                if hasattr(scr, 'refresh'):
-                    scr.refresh()
-            except:
-                pass
-        except Exception as e:
-            self.msg("Błąd", str(e))
+            scr = self.clothes_sm.get_screen('orders')
+            if hasattr(scr, 'refresh'):
+                scr.refresh()
+        except Exception as exc:
+            self.log(f"Failed to refresh orders screen after status update: {exc}")
 
     def export_clothes_history_csv(self):
         try:
             p = Path(self.user_data_dir) / "clothes_history.csv"
             rows = self.conn.execute("SELECT worker_id, item, date FROM clothes_history ORDER BY date DESC").fetchall()
-            with open(p, "w", encoding="utf-8") as f:
-                f.write("worker_id,item,date\\n")
+            with open(p, "w", encoding="utf-8", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["worker_id", "item", "date"])
                 for r in rows:
-                    f.write(f"{r[0]},{r[1]},{r[2]}\\n")
+                    writer.writerow([r[0], r[1], r[2]])
             self.msg("OK", f"Zapisano {p.name}")
+            self.log(f"Exported clothes history to CSV: {p}")
         except Exception as e:
             self.msg("Błąd", str(e))
 
@@ -1210,11 +1301,11 @@ class FutureApp(App):
         def save(_):
             try:
                 if record and record[0]:
-                    self.conn.execute(""""
+                    self.conn.execute("""
                     UPDATE clothes_sizes SET name=?, surname=?, plant=?, shirt=?, hoodie=?, pants=?, jacket=?, shoes=? WHERE id=?
                     """, (name_ti.text.strip(), surname_ti.text.strip(), plant_ti.text.strip(), shirt_ti.text.strip(), hoodie_ti.text.strip(), pants_ti.text.strip(), jacket_ti.text.strip(), shoes_ti.text.strip(), record[0]))
                 else:
-                    self.conn.execute(""""
+                    self.conn.execute("""
                     INSERT INTO clothes_sizes (name,surname,plant,shirt,hoodie,pants,jacket,shoes) VALUES (?,?,?,?,?,?,?,?)
                     """, (name_ti.text.strip(), surname_ti.text.strip(), plant_ti.text.strip(), shirt_ti.text.strip(), hoodie_ti.text.strip(), pants_ti.text.strip(), jacket_ti.text.strip(), shoes_ti.text.strip()))
                 self.conn.commit()
@@ -1251,7 +1342,10 @@ class FutureApp(App):
                 except: pass
             except Exception as e:
                 self.msg("Błąd", str(e))
-        px = Popup(title="Usuń?", content=BoxLayout(orientation="vertical", children=[ModernButton(text="USUŃ", on_press=do_delete, size_hint_y=None, height=dp(50))]), size_hint=(0.7,0.3))
+        content = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
+        content.add_widget(Label(text="Czy na pewno chcesz usunąć ten rekord?"))
+        content.add_widget(ModernButton(text="USUŃ", on_press=do_delete, size_hint_y=None, height=dp(50), bg_color=(0.7, 0.1, 0.1, 1)))
+        px = Popup(title="Usuń?", content=content, size_hint=(0.7,0.3))
         px.open()
 
     def process_excel(self, path):
@@ -1577,7 +1671,17 @@ class FutureApp(App):
             r.add_widget(acts); self.c_ls.add_widget(r)
 
     def msg(self, tit, txt):
-        b = BoxLayout(orientation="vertical", padding=dp(20)); b.add_widget(Label(text=txt, halign="center")); b.add_widget(ModernButton(text="OK", on_press=lambda x: p.dismiss(), height=dp(50), size_hint_y=None)); p = Popup(title=tit, content=b, size_hint=(0.85, 0.45)); p.open()
+        safe_title = str(tit) if tit is not None else "Informacja"
+        safe_text = str(txt) if txt is not None else ""
+        b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
+        lbl = Label(text=safe_text, halign="left", valign="middle")
+        lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(10), None)))
+        b.add_widget(lbl)
+        close_btn = ModernButton(text="OK", height=dp(50), size_hint_y=None)
+        b.add_widget(close_btn)
+        p = Popup(title=safe_title, content=b, size_hint=(0.85, 0.45))
+        close_btn.bind(on_press=lambda *_: p.dismiss())
+        p.open()
 
     def update_stats(self, *a):
         try:
