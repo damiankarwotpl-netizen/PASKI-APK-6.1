@@ -19,7 +19,7 @@ version = 10.1
 
 # (list) Application requirements
 # UWAGA: Dodano jdcal i et_xmlfile - są niezbędne dla stabilności openpyxl!
-requirements = python3, kivy==2.3.0, openpyxl, jdcal, et_xmlfile, jnius, android, sqlite3, requests, urllib3, xlrd, openssl
+requirements = python3, kivy==2.3.0, openpyxl, jdcal, et_xmlfile, jnius, android, sqlite3, requests, urllib3, xlrd, openssl, pandas, reportlab
 
 # (str) Supported orientations
 orientation = portrait
