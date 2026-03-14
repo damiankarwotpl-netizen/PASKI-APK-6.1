@@ -72,6 +72,10 @@ class ColorSafeLabel(Label):
         self.rect.size, self.rect.pos = self.size, self.pos
         self.text_size = (self.width - dp(10), None)
 
+# ==========================================
+# ZINTEGROWANY CLOTHES SIZES SCREEN
+# ==========================================
+
 class ClothesSizesScreen(Screen):
     def on_enter(self):
         if not hasattr(self, 'built'):
@@ -91,6 +95,10 @@ class ClothesSizesScreen(Screen):
         top.add_widget(ModernButton(text="Wróć", size_hint_x=0.15, on_press=lambda x: setattr(App.get_running_app().sm, 'current', 'clothes')))
         root.add_widget(top)
 
+        # INTEGRACJA PATCHA: WYSZUKIWARKA
+        search_bar = build_sizes_search_bar(App.get_running_app(), self.refresh)
+        root.add_widget(search_bar)
+
         sc = ScrollView()
         self.list_layout = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=dp(6))
         self.list_layout.bind(minimum_height=self.list_layout.setter('height'))
@@ -101,21 +109,29 @@ class ClothesSizesScreen(Screen):
         self.built = True
 
     def refresh(self):
-        self.list_layout.clear_widgets()
-        rows = App.get_running_app().conn.execute(
-            "SELECT id, name, surname, plant, shirt, hoodie, pants, jacket, shoes FROM clothes_sizes ORDER BY surname"
+        # INTEGRACJA PATCHA: KOMPLEKSOWE BUDOWANIE LISTY
+        app = App.get_running_app()
+        rows = app.conn.execute(
+            "SELECT id, name, surname, plant, shirt, hoodie, pants, jacket, shoes FROM clothes_sizes"
         ).fetchall()
+        
+        # Przekazujemy sformatowane dane do funkcji patcha
+        formatted_rows = []
         for r in rows:
-            box = BoxLayout(size_hint_y=None, height=dp(80), padding=dp(6), spacing=dp(8))
-            txt = f"{r[1]} {r[2]} ({r[3]})   K:{r[4]}   B:{r[5]}   S:{r[6]}   KUR:{r[7]}   BUT:{r[8]}"
-            lbl = Label(text=txt, size_hint_x=0.78, halign='left', valign='middle')
-            lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(12), None)))
-            btns = BoxLayout(size_hint_x=0.22, spacing=dp(6))
-            btns.add_widget(ModernButton(text="Edytuj", on_press=lambda x, data=r: App.get_running_app().edit_clothes_size(data)))
-            btns.add_widget(ModernButton(text="Usuń", bg_color=(0.7,0.1,0.1,1), on_press=lambda x, data=r: App.get_running_app().delete_clothes_size(data[0])))
-            box.add_widget(lbl)
-            box.add_widget(btns)
-            self.list_layout.add_widget(box)
+            # Tworzymy krotkę zgodną z oczekiwaniami build_sizes_list (id, name+surname, plant, sizes...)
+            formatted_rows.append((r[0], f"{r[1]} {r[2]}", r[3], r[4], r[5], r[6], r[7], r[8]))
+            
+        build_sizes_list(
+            app, 
+            self.list_layout, 
+            formatted_rows, 
+            edit_cb=app.edit_clothes_size_by_id, 
+            delete_cb=app.delete_clothes_size
+        )
+
+# ==========================================
+# ORYGINALNE EKRANY UBRAŃ
+# ==========================================
 
 class ClothesOrdersScreen(Screen):
     def on_enter(self):
@@ -240,6 +256,10 @@ class ClothesReportsScreen(Screen):
         c.save()
         App.get_running_app().msg("OK", f"Zapisano: {path.name}")
         db.log(f"Generated clothes report: {path}")
+
+# ==========================================
+# GŁÓWNA KLASA APLIKACJI - FUTURE APP
+# ==========================================
 
 class FutureApp(App):
     def build(self):
@@ -1093,6 +1113,14 @@ class FutureApp(App):
     def edit_clothes_size(self, record):
         self.form_clothes_size(record)
 
+    def edit_clothes_size_by_id(self, worker_id):
+        # Pomocnicza metoda dla patcha
+        row = self.conn.execute(
+            "SELECT id, name, surname, plant, shirt, hoodie, pants, jacket, shoes FROM clothes_sizes WHERE id=?", (worker_id,)
+        ).fetchone()
+        if row:
+            self.form_clothes_size(row)
+
     def delete_clothes_size(self, rec_id):
         def do_delete(_):
             try:
@@ -1396,7 +1424,7 @@ class FutureApp(App):
                     srv.send_message(msg)
                 srv.quit(); Clock.schedule_once(lambda d: self.msg("OK", "Wysłano")); self.log(f"Special send file {path} to {len(self.selected_emails)} recipients")
             threading.Thread(target=task, daemon=True).start(); p.dismiss()
-        b.add_widget(ModernButton(text="WYŚLIJ PLIK", on_press=run)); p = Popup(title="Wiadomość", content=b, size_hint=(.9, .8)); p.open()
+        b.add_widget(ModernButton(text="WYŚLIJ PLIK", on_press=run)); p = Popup(title="Wiadomość", content=b, size_hint=(0.9, 0.8)); p.open()
 
     def filter_table(self, i, v): self.filtered_data = [self.full_data[0]] + [r for r in self.full_data[1:] if any(v.lower() in str(c).lower() for c in r)]; self.refresh_table()
 
@@ -1451,7 +1479,8 @@ class FutureApp(App):
         self.sc_ref["contacts"].clear_widgets()
         l, top = BoxLayout(orientation="vertical", padding=dp(10)), BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5))
         self.ti_cs = TextInput(hint_text="Szukaj..."); self.ti_cs.bind(text=self.refresh_contacts_list); top.add_widget(self.ti_cs)
-        top.add_widget(Button(text="+", size_hint_x=0.15, on_press=lambda x: self.form_contact())); top.add_widget(Button(text="Wróć", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
+        top.add_widget(Button(text="+", size_hint_x=0.15, on_press=lambda x: self.form_contact()))
+        top.add_widget(Button(text="Wróć", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
         self.c_ls = GridLayout(cols=1, size_hint_y=None, spacing=dp(10)); self.c_ls.bind(minimum_height=self.c_ls.setter('height'))
         sc = ScrollView(); sc.add_widget(self.c_ls); l.add_widget(top); l.add_widget(sc); self.sc_ref["contacts"].add_widget(l)
 
@@ -1467,8 +1496,6 @@ class FutureApp(App):
             info_text = f"E: {d[2]}\nP: {d[3]}\nT: {d[4] if d[4] else '-'}\nAdres: {d[6] if d[6] else '-'}"
             inf.add_widget(Label(text=info_text, font_size='11sp', halign="left", text_size=(dp(250),None), color=(0.7,0.7,0.7,1)))
             r.add_widget(inf)
-            qbox = self.contact_quick_actions(d[4], d[0], d[1])
-            r.add_widget(qbox)
             acts.add_widget(Button(text="Edytuj", on_press=lambda x, data=d: self.form_contact(*data)))
             acts.add_widget(Button(text="Usuń", background_color=(0.8,0.2,0.2,1), on_press=lambda x, n=d[0], s=d[1]: self.delete_contact(n, s)))
             r.add_widget(acts); self.c_ls.add_widget(r)
@@ -1506,13 +1533,6 @@ class FutureApp(App):
         Clock.schedule_once(lambda dt: self.msg("Mailing", f"{s}\nSukces: {self.stats['ok']}"))
         self.log(f"Mailing finished: {s} | ok={self.stats['ok']} fail={self.stats['fail']} skip={self.stats['skip']}")
 
-    def popup_columns(self, _):
-        box, gr, checks = BoxLayout(orientation="vertical", padding=dp(10)), GridLayout(cols=1, size_hint_y=None, spacing=dp(5)), []
-        gr.bind(minimum_height=gr.setter('height'))
-        for i, h in enumerate(self.full_data[0]):
-            r, cb = BoxLayout(size_hint_y=None, height=dp(45)), CheckBox(active=(i in self.export_indices), size_hint_x=None, width=dp(50)); checks.append((i, cb)); r.add_widget(cb); r.add_widget(Label(text=str(h))); gr.add_widget(r)
-        sc = ScrollView(); sc.add_widget(gr); box.add_widget(sc); box.add_widget(ModernButton(text="ZASTOSUJ", on_press=lambda x: [setattr(self, 'export_indices', [idx for idx, c in checks if c.active]), p.dismiss(), self.refresh_table()], height=dp(50), size_hint_y=None)); p = Popup(title="Kolumny", content=box, size_hint=(0.9, 0.9)); p.open()
-
     def setup_report_ui(self):
         self.sc_ref["report"].clear_widgets()
         l, self.r_grid = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)), GridLayout(cols=1, size_hint_y=None, spacing=dp(10))
@@ -1530,24 +1550,9 @@ class FutureApp(App):
 
     def ask_before_send_worker(self, row, email, n, s):
         def dec(v): self.user_decision = "send" if v else "skip"; self.wait_for_user = False; px.dismiss()
-        box = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10)); box.add_widget(Label(text=f"POTWIERDź:\n[b]{n} {s}[/b]\n{email}", markup=True, halign="center"))
+        box = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10)); box.add_widget(Label(text=f"POTWIERDŹ:\n[b]{n} {s}[/b]\n{email}", markup=True, halign="center"))
         btns = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(10)); btns.add_widget(Button(text="WYŚLIJ", on_press=lambda x: dec(True), background_color=(0,0.6,0,1))); btns.add_widget(Button(text="POMIŃ", on_press=lambda x: dec(False), background_color=(0.7,0,0,1)))
         box.add_widget(btns); px = Popup(title="Weryfikacja", content=box, size_hint=(0.9, 0.45), auto_dismiss=False); px.open()
-
-    def export_single_row(self, r):
-        p = Path("/storage/emulated/0/Documents/FutureExport") if platform=="android" else Path("./exports"); p.mkdir(parents=True, exist_ok=True)
-        nx, sx = str(r[self.idx_name]).title(), str(r[self.idx_surname]).title()
-        try:
-            from openpyxl import Workbook
-        except Exception:
-            Workbook = None
-        wb = Workbook(); ws = wb.active
-        ws.append([self.full_data[0][k] for k in self.export_indices]); ws.append([str(r[k]) if (k < len(r) and str(r[k]).strip() != "") else "0" for k in self.export_indices])
-        try:
-            self.style_xlsx(ws)
-        except:
-            pass
-        wb.save(p/f"Raport_{nx}_{sx}.xlsx"); self.msg("OK", f"Zapisano PDF dla: {nx}"); self.log(f"Export single row for {nx} {sx}")
 
     def delete_contact(self, n, s):
         def pr(_):
@@ -1667,255 +1672,103 @@ class FutureApp(App):
             self.log(f"show_logs error: {traceback.format_exc()}")
             self.msg("Błąd", "Nie można otworzyć logów")
 
+# ==========================================
+# MEGA PATCH UI - ROZMIARY PRACOWNIKÓW
+# ==========================================
 
-# =====================================================
-# FUTURE ULTRA MEGA PATCH – MODUŁ UBRANIA ENTERPRISE
-# =====================================================
+def build_worker_sizes_card(name, plant, k, b, s, kur, but, edit_cb=None, delete_cb=None):
+    card = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(6), size_hint_y=None)
+    card.bind(minimum_height=card.setter("height"))
+    title = Label(text=f"[b]{name}[/b]", markup=True, font_size="18sp", size_hint_y=None, height=dp(30), halign="left", valign="middle")
+    title.bind(size=title.setter("text_size"))
+    plant_lbl = Label(text=f"{plant}", size_hint_y=None, height=dp(22), halign="left", valign="middle")
+    plant_lbl.bind(size=plant_lbl.setter("text_size"))
+    sizes_text = (f"Koszulka: {k}\n" f"Bluza: {b}\n" f"Spodnie: {s}\n" f"Kurtka: {kur}\n" f"Buty: {but}")
+    sizes_lbl = Label(text=sizes_text, size_hint_y=None, halign="left", valign="top")
+    sizes_lbl.bind(width=lambda s, w: setattr(s, "text_size", (w, None)), texture_size=lambda s, t: setattr(s, "height", t[1]))
+    btns = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(10))
+    edit_btn = ModernButton(text="Edytuj")
+    del_btn = ModernButton(text="Usuń")
+    if edit_cb: edit_btn.bind(on_press=edit_cb)
+    if delete_cb: del_btn.bind(on_press=delete_cb)
+    btns.add_widget(edit_btn); btns.add_widget(del_btn)
+    card.add_widget(title); card.add_widget(plant_lbl); card.add_widget(sizes_lbl); card.add_widget(btns)
+    return card
 
-def future_init_clothes_db(self):
+def build_sizes_search_bar(app, refresh_callback):
+    box = BoxLayout(size_hint_y=None, height=dp(50), padding=dp(6))
+    search = TextInput(hint_text="🔍 Szukaj pracownika...", multiline=False)
+    def on_text(instance, value):
+        app._sizes_filter = value.lower()
+        refresh_callback()
+    search.bind(text=on_text)
+    box.add_widget(search)
+    return box
 
-    conn = sqlite3.connect(self.db_path)
-    c = conn.cursor()
+def filter_workers_list(rows, app):
+    q = getattr(app, "_sizes_filter", "")
+    if not q: return rows
+    out = []
+    for r in rows:
+        txt = " ".join([str(x) for x in r]).lower()
+        if q in txt: out.append(r)
+    return out
 
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS clothes_sizes(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT,
-        zaklad TEXT,
-        koszulka TEXT,
-        bluza TEXT,
-        spodnie TEXT,
-        kurtka TEXT,
-        buty TEXT
-    )
-    """)
+def sort_workers_by_plant(rows):
+    try: return sorted(rows, key=lambda r: (r[2], r[1]))
+    except: return rows
 
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS clothes_history(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        worker TEXT,
-        zaklad TEXT,
-        item TEXT,
-        size TEXT,
-        date TEXT
-    )
-    """)
+def add_separator(container):
+    container.add_widget(Label(text="", size_hint_y=None, height=dp(12)))
 
-    conn.commit()
-    conn.close()
+def add_plant_header(container, plant):
+    header = Label(text=f"[b]{plant}[/b]", markup=True, font_size="20sp", size_hint_y=None, height=dp(36), halign="left", valign="middle")
+    header.bind(size=header.setter("text_size"))
+    container.add_widget(header)
 
-
-# =====================================================
-# WYŚWIETLANIE ROZMIARÓW – NAPRAWIONE
-# =====================================================
-
-def refresh_sizes_list(self):
-
-    container = self.sizes_list
+def build_sizes_list(app, container, rows, edit_cb=None, delete_cb=None):
     container.clear_widgets()
-
-    conn = sqlite3.connect(self.db_path)
-    cur = conn.cursor()
-
-    cur.execute("""
-    SELECT id,name,zaklad,koszulka,bluza,spodnie,kurtka,buty
-    FROM clothes_sizes
-    ORDER BY name
-    """)
-
-    rows = cur.fetchall()
-    conn.close()
-
-    for row in rows:
-
-        pid,name,zaklad,k,b,s,ku,but = row
-
-        main = BoxLayout(
-            orientation="horizontal",
-            size_hint_y=None,
-            height=dp(150),
-            padding=dp(10),
-            spacing=dp(10)
+    rows = sort_workers_by_plant(rows)
+    rows = filter_workers_list(rows, app)
+    last_plant = None
+    for r in rows:
+        worker_id, name, plant, k, b, s, kur, but = r
+        if plant != last_plant:
+            add_separator(container)
+            add_plant_header(container, plant)
+            add_separator(container)
+            last_plant = plant
+        card = build_worker_sizes_card(name, plant, k, b, s, kur, but,
+            edit_cb=lambda x, wid=worker_id: edit_cb(wid) if edit_cb else None,
+            delete_cb=lambda x, wid=worker_id: delete_cb(wid) if delete_cb else None
         )
+        container.add_widget(card)
+        add_separator(container)
 
-        left = BoxLayout(
-            orientation="vertical",
-            size_hint_x=.75
-        )
+def format_worker_sizes(text):
+    try:
+        parts = text.split(" ")
+        name = parts[0] + " " + parts[1]
+        plant = ""
+        if "(" in text and ")" in text: plant = text.split("(")[1].split(")")[0]
+        k = b = s = kur = but = ""
+        for p in parts:
+            if p.startswith("K:"): k = p.replace("K:", "")
+            if p.startswith("B:"): b = p.replace("B:", "")
+            if p.startswith("S:"): s = p.replace("S:", "")
+            if p.startswith("KUR:"): kur = p.replace("KUR:", "")
+            if p.startswith("BUT:"): but = p.replace("BUT:", "")
+        return (f"{name}\n{plant}\n\n" f"Koszulka: {k}\n" f"Bluza: {b}\n" f"Spodnie: {s}\n" f"Kurtka: {kur}\n" f"Buty: {but}")
+    except: return text
 
-        title = Label(
-            text=f"[b]{name}[/b] ({zaklad})",
-            markup=True,
-            halign="left"
-        )
-
-        sizes = Label(
-            text=
-            f"Koszulka: {k}\n"
-            f"Bluza: {b}\n"
-            f"Spodnie: {s}\n"
-            f"Kurtka: {ku}\n"
-            f"Buty: {but}",
-            halign="left",
-            valign="top"
-        )
-
-        left.add_widget(title)
-        left.add_widget(sizes)
-
-        right = BoxLayout(
-            orientation="vertical",
-            size_hint_x=.25,
-            spacing=dp(6)
-        )
-
-        btn_edit = ModernButton(
-            text="Edytuj",
-            size_hint_y=None,
-            height=dp(45)
-        )
-
-        btn_delete = ModernButton(
-            text="Usuń",
-            size_hint_y=None,
-            height=dp(45),
-            bg_color=(0.8,0.1,0.1,1)
-        )
-
-        btn_issue = ModernButton(
-            text="Wydaj",
-            size_hint_y=None,
-            height=dp(45),
-            bg_color=(0.1,0.6,0.3,1)
-        )
-
-        btn_edit.bind(on_press=lambda x,pid=pid: self.edit_size(pid))
-        btn_delete.bind(on_press=lambda x,pid=pid: self.delete_size(pid))
-        btn_issue.bind(on_press=lambda x,pid=pid: self.issue_clothes(pid))
-
-        right.add_widget(btn_edit)
-        right.add_widget(btn_issue)
-        right.add_widget(btn_delete)
-
-        main.add_widget(left)
-        main.add_widget(right)
-
-        container.add_widget(main)
-
-
-# =====================================================
-# WYDAWANIE UBRAŃ
-# =====================================================
-
-def issue_clothes(self,pid):
-
-    conn = sqlite3.connect(self.db_path)
-    c = conn.cursor()
-
-    c.execute("""
-    SELECT name,zaklad,koszulka,bluza,spodnie,kurtka,buty
-    FROM clothes_sizes
-    WHERE id=?
-    """,(pid,))
-
-    row = c.fetchone()
-
-    if not row:
-        conn.close()
-        return
-
-    name,zaklad,k,b,s,ku,but = row
-
-    today = datetime.now().strftime("%Y-%m-%d")
-
-    data = [
-        ("Koszulka",k),
-        ("Bluza",b),
-        ("Spodnie",s),
-        ("Kurtka",ku),
-        ("Buty",but)
-    ]
-
-    for item,size in data:
-
-        c.execute("""
-        INSERT INTO clothes_history(worker,zaklad,item,size,date)
-        VALUES(?,?,?,?,?)
-        """,(name,zaklad,item,size,today))
-
-    conn.commit()
-    conn.close()
-
-    self.msg("OK","Ubrania wydane")
-
-
-# =====================================================
-# STATYSTYKI PRACOWNIKA
-# =====================================================
-
-def clothes_stats(self,worker):
-
-    conn = sqlite3.connect(self.db_path)
-    c = conn.cursor()
-
-    c.execute("""
-    SELECT item,COUNT(*),MAX(date)
-    FROM clothes_history
-    WHERE worker=?
-    GROUP BY item
-    """,(worker,))
-
-    rows = c.fetchall()
-    conn.close()
-
-    txt=""
-
-    for item,count,last in rows:
-
-        txt+=f"{item}: {count} szt\n"
-        txt+=f"Ostatnio: {last}\n\n"
-
-    self.msg("Statystyki",txt)
-
-
-# =====================================================
-# RAPORT SYSTEMU UBRAŃ
-# =====================================================
-
-def clothes_report(self):
-
-    conn = sqlite3.connect(self.db_path)
-    c = conn.cursor()
-
-    c.execute("""
-    SELECT worker,item,COUNT(*)
-    FROM clothes_history
-    GROUP BY worker,item
-    ORDER BY worker
-    """)
-
-    rows=c.fetchall()
-    conn.close()
-
-    report=""
-
-    for w,i,cnt in rows:
-
-        report+=f"{w} - {i}: {cnt}\n"
-
-    self.msg("Raport ubrań",report)
-
-
-# =====================================================
-# AUTO PODPIĘCIE PATCHA
-# =====================================================
-
-FutureApp.future_init_clothes_db = future_init_clothes_db
-FutureApp.refresh_sizes_list = refresh_sizes_list
-FutureApp.issue_clothes = issue_clothes
-FutureApp.clothes_stats = clothes_stats
-FutureApp.clothes_report = clothes_report
+# --- MONKEY PATCH LABEL ---
+from kivy.uix.label import Label as KivyLabel
+_old_label_init = KivyLabel.__init__
+def _patched_label_init(self, *args, **kwargs):
+    txt = kwargs.get("text", "")
+    if "K:" in txt and "BUT:" in txt: kwargs["text"] = format_worker_sizes(txt)
+    _old_label_init(self, *args, **kwargs)
+KivyLabel.__init__ = _patched_label_init
 
 if __name__ == "__main__":
     FutureApp().run()
-
