@@ -1690,68 +1690,132 @@ class FutureApp(App):
 
     def process_book(self, path):
         try:
-            wb = load_workbook(path, data_only=True); ws = wb.active; raw = list(ws.iter_rows(values_only=True))
+            if load_workbook is None:
+                self.msg("Błąd", "Brak openpyxl - import niemożliwy")
+                return
+
+            wb = load_workbook(path, data_only=True)
+            ws = wb.active
+            raw = list(ws.iter_rows(values_only=True))
             if not raw or not raw[0]:
                 self.msg("Błąd", "Pusty plik")
                 return
+
             headers = ["" if v is None else str(v).strip() for v in raw[0]]
             h_low = [h.lower() for h in headers]
-            iN = iS = iE = iP = iPhone = -1
-            for i, v in enumerate(h_low):
-                if iN == -1 and ("imi" in v or v == "name"): iN = i
-                if iS == -1 and ("naz" in v or v == "surname" or "nazw" in v): iS = i
-                if iE == -1 and ("@" in v or "mail" in v): iE = i
-                if iP == -1 and "pesel" in v: iP = i
-                if iPhone == -1 and any(x in v for x in ["tel", "phone", "telefon"]): iPhone = i
-            if iE != -1:
-                for r in raw[1:]:
-                    try:
-                        e = r[iE] if iE < len(r) else None
-                        if e and "@" in str(e):
-                            n = r[iN] if iN < len(r) and iN != -1 else ""
-                            s = r[iS] if iS < len(r) and iS != -1 else ""
-                            p = r[iP] if iP < len(r) and iP != -1 else ""
-                            ph = r[iPhone] if iPhone < len(r) and iPhone != -1 else ""
-                            self.conn.execute("INSERT OR REPLACE INTO contacts (name,surname,email,pesel,phone,workplace,apartment) VALUES (?,?,?,?,?,?,?)", (str(n).lower(), str(s).lower(), str(e).strip(), str(p) if p is not None else "", str(ph) if ph is not None else "", "", ""))
-                    except:
-                        pass
-            iN_cl = iS_cl = iPlant = iShirt = iHoodie = iPants = iJacket = iShoes = -1
-            for i, v in enumerate(h_low):
-                if iN_cl == -1 and any(k in v for k in ['imi', 'imie', 'name']): iN_cl = i
-                if iS_cl == -1 and any(k in v for k in ['naz', 'nazw', 'surname']): iS_cl = i
-                if iPlant == -1 and any(k in v for k in ['zak', 'zaklad', 'plant']): iPlant = i
-                if iShirt == -1 and any(k in v for k in ['kosz', 'shirt']): iShirt = i
-                if iHoodie == -1 and any(k in v for k in ['bluz', 'hoodie', 'hood']): iHoodie = i
-                if iPants == -1 and any(k in v for k in ['spod', 'pants', 'trous']): iPants = i
-                if iJacket == -1 and any(k in v for k in ['kurt', 'jacket']): iJacket = i
-                if iShoes == -1 and any(k in v for k in ['but', 'shoe']): iShoes = i
-            if iN_cl != -1 and iS_cl != -1 and (iShirt != -1 or iHoodie != -1 or iPants != -1 or iJacket != -1 or iShoes != -1):
-                for r in raw[1:]:
-                    try:
-                        n = r[iN_cl] if iN_cl < len(r) and r[iN_cl] is not None else ""
-                        s = r[iS_cl] if iS_cl < len(r) and r[iS_cl] is not None else ""
-                        plant = r[iPlant] if iPlant != -1 and iPlant < len(r) and r[iPlant] is not None else ""
+
+            def find_col(keywords):
+                for i, v in enumerate(h_low):
+                    if any(k in v for k in keywords):
+                        return i
+                return -1
+
+            # podstawowe pola wspólne
+            iN = find_col(['imi', 'imie', 'name'])
+            iS = find_col(['nazw', 'naz', 'surname'])
+            iE = find_col(['mail', '@'])
+            iP = find_col(['pesel'])
+            iPhone = find_col(['tel', 'telefon', 'phone'])
+            iPlant = find_col(['zak', 'zaklad', 'plant'])
+            iApartment = find_col(['adres', 'miesz', 'apart'])
+            iNotes = find_col(['notat', 'uwag', 'opis', 'notes'])
+
+            # pola rozmiarów
+            iShirt = find_col(['kosz', 'shirt', 'tshirt', 't-shirt'])
+            iHoodie = find_col(['bluz', 'hoodie', 'hood'])
+            iPants = find_col(['spod', 'pants', 'trous'])
+            iJacket = find_col(['kurt', 'jacket'])
+            iShoes = find_col(['but', 'shoe'])
+
+            if iN == -1 or iS == -1:
+                self.msg("Błąd", "Nie wykryto kolumn imię/nazwisko")
+                return
+
+            imported_contacts = 0
+            imported_workers = 0
+            imported_sizes = 0
+
+            for r in raw[1:]:
+                try:
+                    n = r[iN] if iN < len(r) and r[iN] is not None else ""
+                    sname = r[iS] if iS < len(r) and r[iS] is not None else ""
+                    n = str(n).strip()
+                    sname = str(sname).strip()
+                    if not n or not sname:
+                        continue
+
+                    email = r[iE] if iE != -1 and iE < len(r) and r[iE] is not None else ""
+                    pesel = r[iP] if iP != -1 and iP < len(r) and r[iP] is not None else ""
+                    phone = r[iPhone] if iPhone != -1 and iPhone < len(r) and r[iPhone] is not None else ""
+                    plant = r[iPlant] if iPlant != -1 and iPlant < len(r) and r[iPlant] is not None else ""
+                    apartment = r[iApartment] if iApartment != -1 and iApartment < len(r) and r[iApartment] is not None else ""
+                    notes = r[iNotes] if iNotes != -1 and iNotes < len(r) and r[iNotes] is not None else ""
+
+                    # kontakt
+                    self.conn.execute(
+                        "INSERT OR REPLACE INTO contacts (name,surname,email,pesel,phone,workplace,apartment,notes) VALUES (?,?,?,?,?,?,?,?)",
+                        (n.lower(), sname.lower(), str(email).strip(), str(pesel).strip(), str(phone).strip(), str(plant).strip(), str(apartment).strip(), str(notes).strip())
+                    )
+                    imported_contacts += 1
+
+                    # pracownik
+                    wr = self.conn.execute(
+                        "SELECT id FROM workers WHERE lower(name)=lower(?) AND lower(surname)=lower(?) LIMIT 1",
+                        (n, sname)
+                    ).fetchone()
+                    if wr:
+                        self.conn.execute(
+                            "UPDATE workers SET plant=?, phone=? WHERE id=?",
+                            (str(plant).strip(), str(phone).strip(), wr[0])
+                        )
+                    else:
+                        self.conn.execute(
+                            "INSERT INTO workers(name, surname, plant, phone, position, hire_date) VALUES(?,?,?,?,?,?)",
+                            (n, sname, str(plant).strip(), str(phone).strip(), "", "")
+                        )
+                    imported_workers += 1
+
+                    # rozmiary - zapisuj jeśli znaleziono choć jedną kolumnę rozmiarową
+                    has_size_cols = any(idx != -1 for idx in [iShirt, iHoodie, iPants, iJacket, iShoes])
+                    if has_size_cols:
                         shirt = r[iShirt] if iShirt != -1 and iShirt < len(r) and r[iShirt] is not None else ""
                         hoodie = r[iHoodie] if iHoodie != -1 and iHoodie < len(r) and r[iHoodie] is not None else ""
                         pants = r[iPants] if iPants != -1 and iPants < len(r) and r[iPants] is not None else ""
                         jacket = r[iJacket] if iJacket != -1 and iJacket < len(r) and r[iJacket] is not None else ""
                         shoes = r[iShoes] if iShoes != -1 and iShoes < len(r) and r[iShoes] is not None else ""
-                        self.conn.execute(
-                            "INSERT INTO clothes_sizes (name, surname, plant, shirt, hoodie, pants, jacket, shoes) VALUES (?,?,?,?,?,?,?,?)",
-                            (str(n).strip(), str(s).strip(), str(plant).strip(), str(shirt).strip(), str(hoodie).strip(), str(pants).strip(), str(jacket).strip(), str(shoes).strip())
-                        )
-                    except:
-                        pass
-                self.conn.commit()
+                        sz = self.conn.execute(
+                            "SELECT id FROM clothes_sizes WHERE lower(name)=lower(?) AND lower(surname)=lower(?) LIMIT 1",
+                            (n, sname)
+                        ).fetchone()
+                        if sz:
+                            self.conn.execute(
+                                "UPDATE clothes_sizes SET plant=?, shirt=?, hoodie=?, pants=?, jacket=?, shoes=? WHERE id=?",
+                                (str(plant).strip(), str(shirt).strip(), str(hoodie).strip(), str(pants).strip(), str(jacket).strip(), str(shoes).strip(), sz[0])
+                            )
+                        else:
+                            self.conn.execute(
+                                "INSERT INTO clothes_sizes (name, surname, plant, shirt, hoodie, pants, jacket, shoes) VALUES (?,?,?,?,?,?,?,?)",
+                                (n, sname, str(plant).strip(), str(shirt).strip(), str(hoodie).strip(), str(pants).strip(), str(jacket).strip(), str(shoes).strip())
+                            )
+                        imported_sizes += 1
+                except Exception:
+                    self.log(f"process_book row import error: {traceback.format_exc()}")
+
             self.conn.commit()
+            self.sync_all_contact_links()
+
             try:
                 clothes_count = self.conn.execute("SELECT COUNT(*) FROM clothes_sizes").fetchone()[0]
-            except:
+            except Exception:
                 clothes_count = 0
-            new_ver = self._increment_db_version()
+
+            self._increment_db_version()
             self.update_stats()
-            self.msg("OK", f"Baza ubrań zaktualizowana. Rekordy ubrań: {clothes_count}\nDane ubrań dostępne w module 'Ubranie robocze'.")
-            self.log(f"Imported book: {path} | clothes={clothes_count}")
+            self.msg(
+                "OK",
+                f"Import zakończony.\nKontakty: {imported_contacts}\nPracownicy: {imported_workers}\nRozmiary: {imported_sizes}\nRazem rekordów rozmiarów w bazie: {clothes_count}"
+            )
+            self.log(f"Imported book: {path} | contacts={imported_contacts} workers={imported_workers} sizes={imported_sizes}")
         except Exception as e:
             self.log(f"process_book error: {traceback.format_exc()}")
             self.msg("BŁĄD", f"Nieudany import: {str(e)[:120]}")
