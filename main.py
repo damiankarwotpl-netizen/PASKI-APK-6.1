@@ -7,6 +7,7 @@ import mimetypes
 import time
 import random
 import traceback
+import sys
 import webbrowser
 import urllib.parse
 from datetime import datetime
@@ -341,21 +342,71 @@ class FutureApp(App):
         self.mailing_paused = False
         self._log_buffer = []
 
-        self.init_db()
-        self._screen_initialized = set()
         self.log_file = Path(self.user_data_dir) / "future_v20.log"
         try:
             self.log_file.touch(exist_ok=True)
         except:
             pass
 
+        self.install_crash_handlers()
+
+        try:
+            self.init_db()
+        except Exception:
+            self.write_crash_report(traceback.format_exc(), "init_db")
+        self._screen_initialized = set()
+
         self.sm = ScreenManager(transition=SlideTransition())
         try:
             self.add_screens()
         except Exception:
-            self.log(f"fatal add_screens error: {traceback.format_exc()}")
+            crash_text = traceback.format_exc()
+            self.log(f"fatal add_screens error: {crash_text}")
+            self.write_crash_report(crash_text, "add_screens")
             self._build_fallback_home()
         return self.sm
+
+    def _documents_dir(self):
+        if platform == "android":
+            return Path("/storage/emulated/0/Documents")
+        return Path.home() / "Documents"
+
+    def write_crash_report(self, details, where="runtime"):
+        try:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            content = (
+                f"FUTURE ULTIMATE CRASH REPORT\n"
+                f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"Where: {where}\n"
+                f"Platform: {platform}\n"
+                f"\n{details}\n"
+            )
+            targets = [Path(self.user_data_dir), self._documents_dir()]
+            for target in targets:
+                try:
+                    target.mkdir(parents=True, exist_ok=True)
+                    report = target / f"future_crash_{ts}.txt"
+                    with open(report, "w", encoding="utf-8") as f:
+                        f.write(content)
+                except Exception:
+                    pass
+            self.log(f"Crash report generated ({where})")
+        except Exception:
+            pass
+
+    def install_crash_handlers(self):
+        def _handle(exc_type, exc, tb):
+            text = ''.join(traceback.format_exception(exc_type, exc, tb))
+            self.write_crash_report(text, "sys.excepthook")
+        sys.excepthook = _handle
+
+        def _thread_handle(args):
+            text = ''.join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback))
+            self.write_crash_report(text, "threading.excepthook")
+        try:
+            threading.excepthook = _thread_handle
+        except Exception:
+            pass
 
     def _build_fallback_home(self):
         try:
@@ -365,7 +416,7 @@ class FutureApp(App):
         sc = Screen(name="home")
         root = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(10))
         root.add_widget(Label(text="FUTURE ULTIMATE v20", bold=True, font_size='26sp', color=COLOR_PRIMARY))
-        root.add_widget(Label(text="Uruchomiono tryb awaryjny. Sprawdź logi w Ustawieniach lub plik future_v20.log.", halign='center'))
+        root.add_widget(Label(text="Uruchomiono tryb awaryjny. Sprawdź plik crash .txt w Documents lub future_v20.log.", halign='center'))
         root.add_widget(ModernButton(text="Pokaż logi", on_press=lambda x: self.show_logs()))
         root.add_widget(ModernButton(text="Zamknij", bg_color=(0.65,0.18,0.2,1), on_press=lambda x: self.stop()))
         sc.add_widget(root)
