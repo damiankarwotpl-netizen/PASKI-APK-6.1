@@ -952,13 +952,17 @@ class FutureApp(App):
     def _safe_setup(self, name, fn):
         try:
             fn()
+            return True
         except Exception:
             try:
                 self.log(f"setup error [{name}]: {traceback.format_exc()}")
             except Exception:
                 pass
+            return False
 
     def ensure_screen_ui(self, name):
+        if not hasattr(self, '_screen_initialized'):
+            self._screen_initialized = set()
         if name in self._screen_initialized:
             return
         mapping = {
@@ -978,8 +982,8 @@ class FutureApp(App):
         fn = mapping.get(name)
         if fn is None:
             return
-        self._safe_setup(name, fn)
-        self._screen_initialized.add(name)
+        if self._safe_setup(name, fn):
+            self._screen_initialized.add(name)
 
     def setup_ui_all(self):
         self.sc_ref["home"].clear_widgets()
@@ -1003,18 +1007,6 @@ class FutureApp(App):
         sv.add_widget(grid)
         root.add_widget(sv)
         self.sc_ref["home"].add_widget(root)
-        self._safe_setup("table", self.setup_table_ui)
-        self._safe_setup("email", self.setup_email_ui)
-        self._safe_setup("smtp", self.setup_smtp_ui)
-        self._safe_setup("tmpl", self.setup_tmpl_ui)
-        self._safe_setup("contacts", self.setup_contacts_ui)
-        self._safe_setup("report", self.setup_report_ui)
-        self._safe_setup("cars", self.setup_cars_ui)
-        self._safe_setup("paski", self.setup_paski_ui)
-        self._safe_setup("pracownicy", self.setup_pracownicy_ui)
-        self._safe_setup("zaklady", self.setup_zaklady_ui)
-        self._safe_setup("settings", self.setup_settings_ui)
-        self._safe_setup("clothes", self.setup_clothes_container)
 
     def setup_table_ui(self):
         self.sc_ref["table"].clear_widgets()
@@ -1876,8 +1868,6 @@ class FutureApp(App):
 
     def contact_quick_actions(self, phone, name, surname):
         box = BoxLayout(size_hint_x=0.34, orientation='vertical', spacing=dp(4))
-    def contact_quick_actions(self, phone, name, surname):
-        box = BoxLayout(size_hint_x=0.26, orientation='vertical', spacing=dp(4))
         phone_txt = str(phone).strip() if phone else ""
 
         def copy_phone(_):
@@ -1918,7 +1908,6 @@ class FutureApp(App):
         except Exception:
             self.ensure_extended_tables()
             rows = self.conn.execute("SELECT id, plate, brand, model, plant, mileage, status, driver FROM fleet_cars ORDER BY plate").fetchall()
-        rows = self.conn.execute("SELECT id, plate, brand, model, plant, mileage, status, driver FROM fleet_cars ORDER BY plate").fetchall()
         for row in rows:
             text_blob = " ".join(str(x or "") for x in row).lower()
             if search and search not in text_blob:
@@ -1993,7 +1982,6 @@ class FutureApp(App):
         except Exception:
             self.ensure_extended_tables()
             rows = self.conn.execute('SELECT id, name, surname, plant, phone, position, hire_date FROM workers ORDER BY surname').fetchall()
-        rows = self.conn.execute('SELECT id, name, surname, plant, phone, position, hire_date FROM workers ORDER BY surname').fetchall()
         for row in rows:
             if search and search not in " ".join(str(x or '') for x in row).lower():
                 continue
@@ -2057,7 +2045,6 @@ class FutureApp(App):
         except Exception:
             self.ensure_extended_tables()
             rows = self.conn.execute('SELECT id, name, city, address, contact_phone, notes FROM plants ORDER BY name').fetchall()
-        rows = self.conn.execute('SELECT id, name, city, address, contact_phone, notes FROM plants ORDER BY name').fetchall()
         for row in rows:
             if search and search not in " ".join(str(x or '') for x in row).lower():
                 continue
