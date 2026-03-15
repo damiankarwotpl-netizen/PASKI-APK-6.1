@@ -418,6 +418,43 @@ class FutureApp(App):
         """)
         self.conn.commit()
 
+    def ensure_extended_tables(self):
+        self.conn.execute("""
+        CREATE TABLE IF NOT EXISTS plants(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE,
+        city TEXT,
+        address TEXT,
+        contact_phone TEXT,
+        notes TEXT
+        )
+        """)
+        self.conn.execute("""
+        CREATE TABLE IF NOT EXISTS fleet_cars(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        plate TEXT UNIQUE,
+        brand TEXT,
+        model TEXT,
+        plant TEXT,
+        mileage INTEGER DEFAULT 0,
+        status TEXT,
+        driver TEXT,
+        notes TEXT
+        )
+        """)
+        self.conn.execute("""
+        CREATE TABLE IF NOT EXISTS workers(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        surname TEXT,
+        plant TEXT
+        )
+        """)
+        self._add_column_if_missing('workers', 'phone', 'TEXT')
+        self._add_column_if_missing('workers', 'position', 'TEXT')
+        self._add_column_if_missing('workers', 'hire_date', 'TEXT')
+        self.conn.commit()
+
     def init_db(self):
         db_p = Path(self.user_data_dir) / "future_v20.db"
         self.conn = sqlite3.connect(str(db_p), check_same_thread=False)
@@ -492,6 +529,7 @@ class FutureApp(App):
         date TEXT
         )
         """)
+        self.ensure_extended_tables()
         self.conn.commit()
         try:
             self.patch_contact_extra_fields()
