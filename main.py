@@ -138,16 +138,39 @@ class ClothesSizesScreen(Screen):
             "SELECT id, name, surname, plant, shirt, hoodie, pants, jacket, shoes FROM clothes_sizes ORDER BY surname"
         ).fetchall()
         for r in rows:
-            box = BoxLayout(size_hint_y=None, height=dp(80), padding=dp(6), spacing=dp(8))
-            txt = f"{r[1]} {r[2]} ({r[3]})   K:{r[4]}   B:{r[5]}   S:{r[6]}   KUR:{r[7]}   BUT:{r[8]}"
-            lbl = Label(text=txt, size_hint_x=0.78, halign='left', valign='middle')
-            lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(12), None)))
-            btns = BoxLayout(size_hint_x=0.22, spacing=dp(6))
+            card = BoxLayout(size_hint_y=None, height=dp(190), padding=dp(10), spacing=dp(10))
+            with card.canvas.before:
+                Color(*COLOR_CARD)
+                card_rect = RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
+            card.bind(pos=lambda inst, val, rect=card_rect: setattr(rect, 'pos', val))
+            card.bind(size=lambda inst, val, rect=card_rect: setattr(rect, 'size', val))
+
+            info = BoxLayout(orientation='vertical', size_hint_x=0.76, spacing=dp(4))
+            full_name = f"{r[1]} {r[2]}"
+            head = Label(text=full_name, bold=True, font_size='18sp', halign='left', valign='middle', size_hint_y=None, height=dp(34))
+            head.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(8), None)))
+            info.add_widget(head)
+
+            details = [
+                f"Zakład: {r[3] if str(r[3]).strip() else '-'}",
+                f"Rozmiar koszulki: {r[4] if str(r[4]).strip() else '-'}",
+                f"Rozmiar bluzy: {r[5] if str(r[5]).strip() else '-'}",
+                f"Rozmiar spodni: {r[6] if str(r[6]).strip() else '-'}",
+                f"Rozmiar kurtki: {r[7] if str(r[7]).strip() else '-'}",
+                f"Rozmiar butów: {r[8] if str(r[8]).strip() else '-'}",
+            ]
+            for line in details:
+                lbl = Label(text=line, halign='left', valign='middle', size_hint_y=None, height=dp(22), color=(0.88, 0.9, 0.96, 1))
+                lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(8), None)))
+                info.add_widget(lbl)
+
+            btns = BoxLayout(orientation='vertical', size_hint_x=0.24, spacing=dp(8), padding=[0, dp(8), 0, dp(8)])
             btns.add_widget(ModernButton(text="Edytuj", on_press=lambda x, data=r: App.get_running_app().edit_clothes_size(data)))
             btns.add_widget(ModernButton(text="Usuń", bg_color=(0.7,0.1,0.1,1), on_press=lambda x, data=r: App.get_running_app().delete_clothes_size(data[0])))
-            box.add_widget(lbl)
-            box.add_widget(btns)
-            self.list_layout.add_widget(box)
+
+            card.add_widget(info)
+            card.add_widget(btns)
+            self.list_layout.add_widget(card)
 
 class ClothesOrdersScreen(Screen):
     def on_enter(self):
