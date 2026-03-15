@@ -350,8 +350,27 @@ class FutureApp(App):
             pass
 
         self.sm = ScreenManager(transition=SlideTransition())
-        self.add_screens()
+        try:
+            self.add_screens()
+        except Exception:
+            self.log(f"fatal add_screens error: {traceback.format_exc()}")
+            self._build_fallback_home()
         return self.sm
+
+    def _build_fallback_home(self):
+        try:
+            self.sm.clear_widgets()
+        except Exception:
+            pass
+        sc = Screen(name="home")
+        root = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(10))
+        root.add_widget(Label(text="FUTURE ULTIMATE v20", bold=True, font_size='26sp', color=COLOR_PRIMARY))
+        root.add_widget(Label(text="Uruchomiono tryb awaryjny. Sprawdź logi w Ustawieniach lub plik future_v20.log.", halign='center'))
+        root.add_widget(ModernButton(text="Pokaż logi", on_press=lambda x: self.show_logs()))
+        root.add_widget(ModernButton(text="Zamknij", bg_color=(0.65,0.18,0.2,1), on_press=lambda x: self.stop()))
+        sc.add_widget(root)
+        self.sm.add_widget(sc)
+        self.sm.current = "home"
 
     def log(self, txt):
         try:
