@@ -927,6 +927,15 @@ class FutureApp(App):
         except:
             pass
 
+    def _safe_setup(self, name, fn):
+        try:
+            fn()
+        except Exception:
+            try:
+                self.log(f"setup error [{name}]: {traceback.format_exc()}")
+            except Exception:
+                pass
+
     def setup_ui_all(self):
         self.sc_ref["home"].clear_widgets()
         root = BoxLayout(orientation="vertical", padding=[dp(12), dp(12), dp(12), dp(80)], spacing=dp(10))
@@ -949,10 +958,18 @@ class FutureApp(App):
         sv.add_widget(grid)
         root.add_widget(sv)
         self.sc_ref["home"].add_widget(root)
-        self.setup_table_ui()
-        self.setup_email_ui(); self.setup_smtp_ui(); self.setup_tmpl_ui(); self.setup_contacts_ui(); self.setup_report_ui()
-        self.setup_cars_ui(); self.setup_paski_ui(); self.setup_pracownicy_ui(); self.setup_zaklady_ui(); self.setup_settings_ui()
-        self.setup_clothes_container()
+        self._safe_setup("table", self.setup_table_ui)
+        self._safe_setup("email", self.setup_email_ui)
+        self._safe_setup("smtp", self.setup_smtp_ui)
+        self._safe_setup("tmpl", self.setup_tmpl_ui)
+        self._safe_setup("contacts", self.setup_contacts_ui)
+        self._safe_setup("report", self.setup_report_ui)
+        self._safe_setup("cars", self.setup_cars_ui)
+        self._safe_setup("paski", self.setup_paski_ui)
+        self._safe_setup("pracownicy", self.setup_pracownicy_ui)
+        self._safe_setup("zaklady", self.setup_zaklady_ui)
+        self._safe_setup("settings", self.setup_settings_ui)
+        self._safe_setup("clothes", self.setup_clothes_container)
 
     def setup_table_ui(self):
         self.sc_ref["table"].clear_widgets()
