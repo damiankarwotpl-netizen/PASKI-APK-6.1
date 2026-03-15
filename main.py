@@ -342,6 +342,7 @@ class FutureApp(App):
         self._log_buffer = []
 
         self.init_db()
+        self._screen_initialized = set()
         self.log_file = Path(self.user_data_dir) / "future_v20.log"
         try:
             self.log_file.touch(exist_ok=True)
@@ -912,6 +913,8 @@ class FutureApp(App):
         self.setup_ui_all()
         for s in self.sc_ref.values():
             self.sm.add_widget(s)
+            if s.name != "home":
+                s.bind(on_pre_enter=lambda inst, *a: self.ensure_screen_ui(inst.name))
         if "clothes" in self.sc_ref:
             self.sc_ref["clothes"].bind(on_enter=lambda inst, *a: self._on_main_clothes_enter())
 
@@ -936,6 +939,29 @@ class FutureApp(App):
             except Exception:
                 pass
 
+    def ensure_screen_ui(self, name):
+        if name in self._screen_initialized:
+            return
+        mapping = {
+            "table": self.setup_table_ui,
+            "email": self.setup_email_ui,
+            "smtp": self.setup_smtp_ui,
+            "tmpl": self.setup_tmpl_ui,
+            "contacts": self.setup_contacts_ui,
+            "report": self.setup_report_ui,
+            "cars": self.setup_cars_ui,
+            "paski": self.setup_paski_ui,
+            "pracownicy": self.setup_pracownicy_ui,
+            "zaklady": self.setup_zaklady_ui,
+            "settings": self.setup_settings_ui,
+            "clothes": self.setup_clothes_container,
+        }
+        fn = mapping.get(name)
+        if fn is None:
+            return
+        self._safe_setup(name, fn)
+        self._screen_initialized.add(name)
+
     def setup_ui_all(self):
         self.sc_ref["home"].clear_widgets()
         root = BoxLayout(orientation="vertical", padding=[dp(12), dp(12), dp(12), dp(80)], spacing=dp(10))
@@ -947,7 +973,7 @@ class FutureApp(App):
         grid = GridLayout(cols=2, spacing=dp(12), padding=dp(10), size_hint_y=None)
         grid.bind(minimum_height=grid.setter('height'))
         btn_props = dict(size_hint_y=None, height=dp(80))
-        grid.add_widget(ModernButton(text="Kontakty", bg_color=(0.13,0.48,0.82,1), on_press=lambda x: [self.refresh_contacts_list(), setattr(self.sm, 'current', 'contacts')], **btn_props))
+        grid.add_widget(ModernButton(text="Kontakty", bg_color=(0.13,0.48,0.82,1), on_press=lambda x: [self.ensure_screen_ui("contacts"), self.refresh_contacts_list(), setattr(self.sm, 'current', 'contacts')], **btn_props))
         grid.add_widget(ModernButton(text="Samochody", bg_color=(0.27,0.53,0.86,1), on_press=lambda x: setattr(self.sm, 'current', 'cars'), **btn_props))
         grid.add_widget(ModernButton(text="Ubranie robocze", bg_color=(0.17,0.58,0.76,1), on_press=lambda x: setattr(self.sm, 'current', 'clothes'), **btn_props))
         grid.add_widget(ModernButton(text="Paski", bg_color=(0.1,0.62,0.68,1), on_press=lambda x: setattr(self.sm, 'current', 'paski'), **btn_props))
@@ -1792,6 +1818,45 @@ class FutureApp(App):
             self.update_stats()
         b.add_widget(ModernButton(text="ZAPISZ", on_press=save)); px = Popup(title="Kontakt", content=b, size_hint=(0.9, 0.85)); px.open()
 
+    def _normalize_phone(self, phone):
+        raw = ''.join(ch for ch in str(phone or '') if ch.isdigit() or ch == '+')
+        if raw.startswith('00'):
+            return '+' + raw[2:]
+        if raw and not raw.startswith('+') and len(raw) >= 9:
+            return '+48' + raw[-9:]
+        return raw
+
+    def _call_contact(self, phone):
+        ph = self._normalize_phone(phone)
+        if not ph:
+            return self.msg("Info", "Brak numeru telefonu")
+        try:
+            if platform == "android":
+                from jnius import autoclass
+                PA = autoclass("org.kivy.android.PythonActivity")
+                Intent = autoclass("android.content.Intent")
+                Uri = autoclass("android.net.Uri")
+                intent = Intent(Intent.ACTION_DIAL)
+                intent.setData(Uri.parse(f"tel:{ph}"))
+                PA.mActivity.startActivity(intent)
+            else:
+                webbrowser.open(f"tel:{ph}")
+        except Exception:
+            self.msg("Błąd", "Nie udało się uruchomić dialera")
+
+    def _whatsapp_contact(self, phone, name=""):
+        ph = self._normalize_phone(phone).replace('+', '')
+        if not ph:
+            return self.msg("Info", "Brak numeru telefonu")
+        text = urllib.parse.quote(f"Dzień dobry {str(name).title()}, ")
+        url = f"https://wa.me/{ph}?text={text}"
+        try:
+            webbrowser.open(url)
+        except Exception:
+            self.msg("Błąd", "Nie udało się otworzyć WhatsApp")
+
+    def contact_quick_actions(self, phone, name, surname):
+        box = BoxLayout(size_hint_x=0.34, orientation='vertical', spacing=dp(4))
     def contact_quick_actions(self, phone, name, surname):
         box = BoxLayout(size_hint_x=0.26, orientation='vertical', spacing=dp(4))
         phone_txt = str(phone).strip() if phone else ""
@@ -1815,6 +1880,8 @@ class FutureApp(App):
             except Exception:
                 self.msg("Błąd", "Nie udało się skopiować danych")
 
+        box.add_widget(ModernButton(text="Zadzwoń", on_press=lambda x: self._call_contact(phone_txt), bg_color=(0.16,0.6,0.3,1)))
+        box.add_widget(ModernButton(text="WhatsApp", on_press=lambda x: self._whatsapp_contact(phone_txt, name), bg_color=(0.06,0.55,0.25,1)))
         box.add_widget(ModernButton(text="Kopiuj tel", on_press=copy_phone))
         box.add_widget(ModernButton(text="Kopiuj imię", on_press=copy_full_name, bg_color=(0.21,0.43,0.72,1)))
         return box
@@ -1827,6 +1894,11 @@ class FutureApp(App):
             return
         self.cars_grid.clear_widgets()
         search = self.ti_cars_search.text.lower() if hasattr(self, 'ti_cars_search') else ""
+        try:
+            rows = self.conn.execute("SELECT id, plate, brand, model, plant, mileage, status, driver FROM fleet_cars ORDER BY plate").fetchall()
+        except Exception:
+            self.ensure_extended_tables()
+            rows = self.conn.execute("SELECT id, plate, brand, model, plant, mileage, status, driver FROM fleet_cars ORDER BY plate").fetchall()
         rows = self.conn.execute("SELECT id, plate, brand, model, plant, mileage, status, driver FROM fleet_cars ORDER BY plate").fetchall()
         for row in rows:
             text_blob = " ".join(str(x or "") for x in row).lower()
@@ -1897,6 +1969,11 @@ class FutureApp(App):
             return
         self.workers_grid.clear_widgets()
         search = self.ti_workers_search.text.lower() if hasattr(self, 'ti_workers_search') else ''
+        try:
+            rows = self.conn.execute('SELECT id, name, surname, plant, phone, position, hire_date FROM workers ORDER BY surname').fetchall()
+        except Exception:
+            self.ensure_extended_tables()
+            rows = self.conn.execute('SELECT id, name, surname, plant, phone, position, hire_date FROM workers ORDER BY surname').fetchall()
         rows = self.conn.execute('SELECT id, name, surname, plant, phone, position, hire_date FROM workers ORDER BY surname').fetchall()
         for row in rows:
             if search and search not in " ".join(str(x or '') for x in row).lower():
@@ -1956,6 +2033,11 @@ class FutureApp(App):
             return
         self.plants_grid.clear_widgets()
         search = self.ti_plants_search.text.lower() if hasattr(self, 'ti_plants_search') else ''
+        try:
+            rows = self.conn.execute('SELECT id, name, city, address, contact_phone, notes FROM plants ORDER BY name').fetchall()
+        except Exception:
+            self.ensure_extended_tables()
+            rows = self.conn.execute('SELECT id, name, city, address, contact_phone, notes FROM plants ORDER BY name').fetchall()
         rows = self.conn.execute('SELECT id, name, city, address, contact_phone, notes FROM plants ORDER BY name').fetchall()
         for row in rows:
             if search and search not in " ".join(str(x or '') for x in row).lower():
