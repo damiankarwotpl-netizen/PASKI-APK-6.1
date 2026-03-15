@@ -87,11 +87,33 @@ class ModernButton(Button):
             self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=self.radius)
             Color(1, 1, 1, 0.12)
             self.border_line = Line(rounded_rectangle=(self.x, self.y, self.width, self.height, dp(12)), width=1)
-        self.bind(pos=self._update, size=self._update, state=self._update_state)
+        state_handler = getattr(self, '_update_state', None)
+        if not callable(state_handler):
+            state_handler = self._fallback_update_state
+        self.bind(pos=self._update, size=self._update, state=state_handler)
+        state_handler()
 
     def _update(self, *args):
         self.rect.pos, self.rect.size = self.pos, self.size
         self.border_line.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(12))
+
+    def _fallback_update_state(self, *args):
+        factor = 0.82 if self.state == 'down' else 1.0
+        self.bg.rgba = (
+            min(1, self.base_color[0] * factor),
+            min(1, self.base_color[1] * factor),
+            min(1, self.base_color[2] * factor),
+            self.base_color[3],
+        )
+
+    def _update_state(self, *args):
+        factor = 0.82 if self.state == 'down' else 1.0
+        self.bg.rgba = (
+            min(1, self.base_color[0] * factor),
+            min(1, self.base_color[1] * factor),
+            min(1, self.base_color[2] * factor),
+            self.base_color[3],
+        )
 
 class ModernInput(TextInput):
     def __init__(self, **kwargs):
