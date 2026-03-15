@@ -26,7 +26,7 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.checkbox import CheckBox
 from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
 from kivy.uix.progressbar import ProgressBar
-from kivy.graphics import Color, Rectangle, RoundedRectangle
+from kivy.graphics import Color, Rectangle, RoundedRectangle, Line
 
 try:
     from openpyxl import load_workbook, Workbook
@@ -76,21 +76,49 @@ class ModernButton(Button):
         self.background_normal = ""
         self.background_color = (0,0,0,0)
         self.color = COLOR_TEXT
-        self.bold, self.radius = True, [dp(12)]
+        self.bold = True
+        self.radius = [dp(12)]
+        self.base_color = bg_color
         with self.canvas.before:
-            Color(*bg_color)
+            self.bg = Color(*self.base_color)
             self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=self.radius)
-        self.bind(pos=self._update, size=self._update)
+            self.border_color = Color(1, 1, 1, 0.12)
+            self.border = Line(rounded_rectangle=(self.x, self.y, self.width, self.height, dp(12)), width=1.2)
+        self.bind(pos=self._update, size=self._update, state=self._update_state)
+
     def _update(self, *args):
         self.rect.pos, self.rect.size = self.pos, self.size
+        self.border.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(12))
+
+    def _update_state(self, *args):
+        factor = 0.82 if self.state == 'down' else 1.0
+        self.bg.rgba = (
+            min(1, self.base_color[0] * factor),
+            min(1, self.base_color[1] * factor),
+            min(1, self.base_color[2] * factor),
+            self.base_color[3],
+        )
 
 class ModernInput(TextInput):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.background_normal = self.background_active = ""
-        self.background_color = (0.15, 0.18, 0.25, 1)
+        self.background_color = (0, 0, 0, 0)
         self.foreground_color = COLOR_TEXT
+        self.cursor_color = COLOR_PRIMARY
+        self.hint_text_color = (0.7, 0.75, 0.82, 1)
         self.padding = [dp(12), dp(12)]
+        with self.canvas.before:
+            Color(0.14, 0.17, 0.24, 1)
+            self.input_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(10)])
+            Color(1, 1, 1, 0.08)
+            self.input_border = Line(rounded_rectangle=(self.x, self.y, self.width, self.height, dp(10)), width=1)
+        self.bind(pos=self._update_input, size=self._update_input)
+
+    def _update_input(self, *args):
+        self.input_rect.pos = self.pos
+        self.input_rect.size = self.size
+        self.input_border.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(10))
 
 class ColorSafeLabel(Label):
     def __init__(self, bg_color=(1,1,1,1), text_color=(1,1,1,1), **kwargs):
@@ -831,21 +859,23 @@ class FutureApp(App):
 
     def setup_ui_all(self):
         self.sc_ref["home"].clear_widgets()
-        root = BoxLayout(orientation="vertical", padding=[dp(10), dp(10), dp(10), dp(80)], spacing=dp(10))
+        root = BoxLayout(orientation="vertical", padding=[dp(12), dp(12), dp(12), dp(80)], spacing=dp(10))
         lbl = Label(text="FUTURE ULTIMATE v20", font_size='34sp', bold=True, color=COLOR_PRIMARY, size_hint_y=None, height=dp(70))
+        sub = Label(text="Panel główny aplikacji", font_size='14sp', color=(0.72, 0.78, 0.9, 1), size_hint_y=None, height=dp(24))
         root.add_widget(lbl)
+        root.add_widget(sub)
         sv = ScrollView(size_hint=(1,1))
         grid = GridLayout(cols=2, spacing=dp(12), padding=dp(10), size_hint_y=None)
         grid.bind(minimum_height=grid.setter('height'))
         btn_props = dict(size_hint_y=None, height=dp(80))
-        grid.add_widget(ModernButton(text="Kontakty", on_press=lambda x: [self.refresh_contacts_list(), setattr(self.sm, 'current', 'contacts')], **btn_props))
-        grid.add_widget(ModernButton(text="Samochody", on_press=lambda x: setattr(self.sm, 'current', 'cars'), **btn_props))
-        grid.add_widget(ModernButton(text="Ubranie robocze", on_press=lambda x: setattr(self.sm, 'current', 'clothes'), **btn_props))
-        grid.add_widget(ModernButton(text="Paski", on_press=lambda x: setattr(self.sm, 'current', 'paski'), **btn_props))
-        grid.add_widget(ModernButton(text="Pracownicy", on_press=lambda x: setattr(self.sm, 'current', 'pracownicy'), **btn_props))
-        grid.add_widget(ModernButton(text="Zakłady", on_press=lambda x: setattr(self.sm, 'current', 'zaklady'), **btn_props))
-        grid.add_widget(ModernButton(text="Ustawienia", on_press=lambda x: setattr(self.sm, 'current', 'settings'), **btn_props))
-        grid.add_widget(ModernButton(text="Wyjście", on_press=lambda x: App.get_running_app().stop(), bg_color=(0.6,0.1,0.1,1), **btn_props))
+        grid.add_widget(ModernButton(text="Kontakty", bg_color=(0.13,0.48,0.82,1), on_press=lambda x: [self.refresh_contacts_list(), setattr(self.sm, 'current', 'contacts')], **btn_props))
+        grid.add_widget(ModernButton(text="Samochody", bg_color=(0.27,0.53,0.86,1), on_press=lambda x: setattr(self.sm, 'current', 'cars'), **btn_props))
+        grid.add_widget(ModernButton(text="Ubranie robocze", bg_color=(0.17,0.58,0.76,1), on_press=lambda x: setattr(self.sm, 'current', 'clothes'), **btn_props))
+        grid.add_widget(ModernButton(text="Paski", bg_color=(0.1,0.62,0.68,1), on_press=lambda x: setattr(self.sm, 'current', 'paski'), **btn_props))
+        grid.add_widget(ModernButton(text="Pracownicy", bg_color=(0.22,0.5,0.73,1), on_press=lambda x: setattr(self.sm, 'current', 'pracownicy'), **btn_props))
+        grid.add_widget(ModernButton(text="Zakłady", bg_color=(0.2,0.45,0.7,1), on_press=lambda x: setattr(self.sm, 'current', 'zaklady'), **btn_props))
+        grid.add_widget(ModernButton(text="Ustawienia", bg_color=(0.34,0.42,0.74,1), on_press=lambda x: setattr(self.sm, 'current', 'settings'), **btn_props))
+        grid.add_widget(ModernButton(text="Wyjście", on_press=lambda x: App.get_running_app().stop(), bg_color=(0.65,0.18,0.2,1), **btn_props))
         sv.add_widget(grid)
         root.add_widget(sv)
         self.sc_ref["home"].add_widget(root)
@@ -1647,16 +1677,16 @@ class FutureApp(App):
     def setup_cars_ui(self):
         self.sc_ref["cars"].clear_widgets()
         b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
-        b.add_widget(Label(text="Moduł Samochody", bold=True))
-        b.add_widget(Label(text="Placeholder - tu będzie rozwijany moduł Samochody"))
+        b.add_widget(Label(text="Moduł Samochody", bold=True, font_size="22sp", color=COLOR_PRIMARY))
+        b.add_widget(Label(text="Panel w przygotowaniu", color=(0.75,0.78,0.84,1)))
         b.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home')))
         self.sc_ref["cars"].add_widget(b)
 
     def setup_paski_ui(self):
         self.sc_ref["paski"].clear_widgets()
         l = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
-        header = BoxLayout(size_hint_y=None, height=dp(40))
-        header.add_widget(Label(text="Moduł Paski", bold=True))
+        header = BoxLayout(size_hint_y=None, height=dp(52))
+        header.add_widget(Label(text="Moduł Paski", bold=True, font_size="24sp", color=COLOR_PRIMARY))
         l.add_widget(header)
         ab = BoxLayout(size_hint_y=None, height=dp(45), spacing=dp(10))
         self.cb_paski_auto = CheckBox(size_hint_x=None, width=dp(45))
@@ -1682,23 +1712,23 @@ class FutureApp(App):
     def setup_pracownicy_ui(self):
         self.sc_ref["pracownicy"].clear_widgets()
         b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
-        b.add_widget(Label(text="Moduł Pracownicy", bold=True))
-        b.add_widget(Label(text="Placeholder - moduł Pracownicy do późniejszego rozwinięcia"))
+        b.add_widget(Label(text="Moduł Pracownicy", bold=True, font_size="22sp", color=COLOR_PRIMARY))
+        b.add_widget(Label(text="Panel w przygotowaniu", color=(0.75,0.78,0.84,1)))
         b.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home')))
         self.sc_ref["pracownicy"].add_widget(b)
 
     def setup_zaklady_ui(self):
         self.sc_ref["zaklady"].clear_widgets()
         b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
-        b.add_widget(Label(text="Moduł Zakłady", bold=True))
-        b.add_widget(Label(text="Placeholder - moduł Zakłady do późniejszego rozwinięcia"))
+        b.add_widget(Label(text="Moduł Zakłady", bold=True, font_size="22sp", color=COLOR_PRIMARY))
+        b.add_widget(Label(text="Panel w przygotowaniu", color=(0.75,0.78,0.84,1)))
         b.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home')))
         self.sc_ref["zaklady"].add_widget(b)
 
     def setup_settings_ui(self):
         self.sc_ref["settings"].clear_widgets()
         l = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
-        l.add_widget(Label(text="Ustawienia", bold=True))
+        l.add_widget(Label(text="Ustawienia", bold=True, font_size="24sp", color=COLOR_PRIMARY))
         l.add_widget(ModernButton(text="Dodaj bazę danych", on_press=lambda x: self.open_picker("book"), height=dp(50), size_hint_y=None))
         l.add_widget(ModernButton(text="Ustawienia SMTP", on_press=lambda x: setattr(self.sm, 'current', 'smtp'), height=dp(50), size_hint_y=None))
         l.add_widget(ModernButton(text="Edytuj szablon email", on_press=lambda x: setattr(self.sm, 'current', 'tmpl'), height=dp(50), size_hint_y=None))
