@@ -988,14 +988,8 @@ class FutureApp(App):
         self.clothes_sm.current = 'sizes'
         container.add_widget(self.clothes_sm)
         self.sc_ref["clothes"].add_widget(container)
-        try:
-            scr = self.clothes_sm.get_screen('sizes')
-            if hasattr(scr, 'build_ui'):
-                scr.build_ui()
-            if hasattr(scr, 'refresh'):
-                scr.refresh()
-        except:
-            pass
+        # Lazy init: cięższe budowanie widoku rozmiarów wykonujemy dopiero przy wejściu
+        # na ekran "clothes" (obsługuje to _on_main_clothes_enter).
 
     # ==========================================
     # MODYFIKACJA: NOWE ZAMÓWIENIE (KROK 1: WYBÓR)
