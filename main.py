@@ -1737,45 +1737,8 @@ class FutureApp(App):
             self.update_stats()
         b.add_widget(ModernButton(text="ZAPISZ", on_press=save)); px = Popup(title="Kontakt", content=b, size_hint=(0.9, 0.85)); px.open()
 
-    def _normalize_phone(self, phone):
-        raw = ''.join(ch for ch in str(phone or '') if ch.isdigit() or ch == '+')
-        if raw.startswith('00'):
-            return '+' + raw[2:]
-        if raw and not raw.startswith('+') and len(raw) >= 9:
-            return '+48' + raw[-9:]
-        return raw
-
-    def _call_contact(self, phone):
-        ph = self._normalize_phone(phone)
-        if not ph:
-            return self.msg("Info", "Brak numeru telefonu")
-        try:
-            if platform == "android":
-                from jnius import autoclass
-                PA = autoclass("org.kivy.android.PythonActivity")
-                Intent = autoclass("android.content.Intent")
-                Uri = autoclass("android.net.Uri")
-                intent = Intent(Intent.ACTION_DIAL)
-                intent.setData(Uri.parse(f"tel:{ph}"))
-                PA.mActivity.startActivity(intent)
-            else:
-                webbrowser.open(f"tel:{ph}")
-        except Exception:
-            self.msg("Błąd", "Nie udało się uruchomić dialera")
-
-    def _whatsapp_contact(self, phone, name=""):
-        ph = self._normalize_phone(phone).replace('+', '')
-        if not ph:
-            return self.msg("Info", "Brak numeru telefonu")
-        text = urllib.parse.quote(f"Dzień dobry {str(name).title()}, ")
-        url = f"https://wa.me/{ph}?text={text}"
-        try:
-            webbrowser.open(url)
-        except Exception:
-            self.msg("Błąd", "Nie udało się otworzyć WhatsApp")
-
     def contact_quick_actions(self, phone, name, surname):
-        box = BoxLayout(size_hint_x=0.34, orientation='vertical', spacing=dp(4))
+        box = BoxLayout(size_hint_x=0.26, orientation='vertical', spacing=dp(4))
         phone_txt = str(phone).strip() if phone else ""
 
         def copy_phone(_):
@@ -1797,8 +1760,6 @@ class FutureApp(App):
             except Exception:
                 self.msg("Błąd", "Nie udało się skopiować danych")
 
-        box.add_widget(ModernButton(text="Zadzwoń", on_press=lambda x: self._call_contact(phone_txt), bg_color=(0.16,0.6,0.3,1)))
-        box.add_widget(ModernButton(text="WhatsApp", on_press=lambda x: self._whatsapp_contact(phone_txt, name), bg_color=(0.06,0.55,0.25,1)))
         box.add_widget(ModernButton(text="Kopiuj tel", on_press=copy_phone))
         box.add_widget(ModernButton(text="Kopiuj imię", on_press=copy_full_name, bg_color=(0.21,0.43,0.72,1)))
         return box
