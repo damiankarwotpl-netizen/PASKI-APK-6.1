@@ -93,15 +93,6 @@ class ModernButton(Button):
         self.rect.pos, self.rect.size = self.pos, self.size
         self.border_line.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(12))
 
-    def _update_state(self, *args):
-        factor = 0.82 if self.state == 'down' else 1.0
-        self.bg.rgba = (
-            min(1, self.base_color[0] * factor),
-            min(1, self.base_color[1] * factor),
-            min(1, self.base_color[2] * factor),
-            self.base_color[3],
-        )
-
 class ModernInput(TextInput):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
