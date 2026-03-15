@@ -26,7 +26,7 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.checkbox import CheckBox
 from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
 from kivy.uix.progressbar import ProgressBar
-from kivy.graphics import Color, Rectangle, RoundedRectangle
+from kivy.graphics import Color, Rectangle, RoundedRectangle, Line
 
 try:
     from openpyxl import load_workbook, Workbook
@@ -86,6 +86,16 @@ class ModernButton(Button):
 
     def _update(self, *args):
         self.rect.pos, self.rect.size = self.pos, self.size
+        self.border.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(12))
+
+    def _update_state(self, *args):
+        factor = 0.82 if self.state == 'down' else 1.0
+        self.bg.rgba = (
+            min(1, self.base_color[0] * factor),
+            min(1, self.base_color[1] * factor),
+            min(1, self.base_color[2] * factor),
+            self.base_color[3],
+        )
 
     def _update_state(self, *args):
         factor = 0.82 if self.state == 'down' else 1.0
@@ -100,11 +110,22 @@ class ModernInput(TextInput):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.background_normal = self.background_active = ""
-        self.background_color = (0.14, 0.17, 0.24, 1)
+        self.background_color = (0, 0, 0, 0)
         self.foreground_color = COLOR_TEXT
         self.cursor_color = COLOR_PRIMARY
         self.hint_text_color = (0.7, 0.75, 0.82, 1)
         self.padding = [dp(12), dp(12)]
+        with self.canvas.before:
+            Color(0.14, 0.17, 0.24, 1)
+            self.input_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(10)])
+            Color(1, 1, 1, 0.08)
+            self.input_border = Line(rounded_rectangle=(self.x, self.y, self.width, self.height, dp(10)), width=1)
+        self.bind(pos=self._update_input, size=self._update_input)
+
+    def _update_input(self, *args):
+        self.input_rect.pos = self.pos
+        self.input_rect.size = self.size
+        self.input_border.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(10))
 
 class ColorSafeLabel(Label):
     def __init__(self, bg_color=(1,1,1,1), text_color=(1,1,1,1), **kwargs):
