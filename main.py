@@ -826,9 +826,62 @@ class FutureApp(App):
         sv.add_widget(grid)
         root.add_widget(sv)
         self.sc_ref["home"].add_widget(root)
+        self.setup_table_ui()
         self.setup_email_ui(); self.setup_smtp_ui(); self.setup_tmpl_ui(); self.setup_contacts_ui(); self.setup_report_ui()
         self.setup_cars_ui(); self.setup_paski_ui(); self.setup_pracownicy_ui(); self.setup_zaklady_ui(); self.setup_settings_ui()
         self.setup_clothes_container()
+
+    def setup_table_ui(self):
+        self.sc_ref["table"].clear_widgets()
+        root = BoxLayout(orientation="vertical")
+        menu = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5), padding=dp(5))
+        self.ti_tab_search = ModernInput(hint_text="Szukaj w tabeli...")
+        self.ti_tab_search.bind(text=self.filter_table)
+        menu.add_widget(self.ti_tab_search)
+        menu.add_widget(Button(text="KOLUMNY", size_hint_x=0.2, on_press=self.popup_columns))
+        menu.add_widget(Button(text="WRÓĆ", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'paski')))
+
+        hs = ScrollView(size_hint_y=None, height=dp(55), do_scroll_y=False)
+        self.table_header_layout = GridLayout(rows=1, size_hint=(None, None), height=dp(55))
+        hs.add_widget(self.table_header_layout)
+
+        ds = ScrollView(do_scroll_x=True, do_scroll_y=True)
+        self.table_content_layout = GridLayout(size_hint=(None, None))
+        self.table_content_layout.bind(minimum_height=self.table_content_layout.setter('height'), minimum_width=self.table_content_layout.setter('width'))
+        ds.add_widget(self.table_content_layout)
+        ds.bind(scroll_x=lambda inst, val: setattr(hs, 'scroll_x', val))
+
+        root.add_widget(menu)
+        root.add_widget(hs)
+        root.add_widget(ds)
+        self.sc_ref["table"].add_widget(root)
+
+    def refresh_table(self):
+        self.table_content_layout.clear_widgets()
+        self.table_header_layout.clear_widgets()
+        if not self.filtered_data:
+            return
+        w_cell, w_act, h = dp(170), dp(220), dp(55)
+        headers = [self.full_data[0][i] for i in self.export_indices]
+
+        total_w = (len(headers) * w_cell) + w_act
+        self.table_header_layout.cols = self.table_content_layout.cols = len(headers) + 1
+        self.table_header_layout.width = self.table_content_layout.width = total_w
+
+        for head in headers:
+            self.table_header_layout.add_widget(ColorSafeLabel(text=str(head), bg_color=COLOR_HEADER, bold=True, size=(w_cell, h), size_hint=(None,None), text_color=(0,0,0,1)))
+        self.table_header_layout.add_widget(ColorSafeLabel(text="AKCJE", bg_color=COLOR_HEADER, bold=True, size=(w_act, h), size_hint=(None,None), text_color=(0,0,0,1)))
+
+        for r_idx, row in enumerate(self.filtered_data[1:]):
+            row_bg = COLOR_ROW_A if r_idx % 2 == 0 else COLOR_ROW_B
+            for c_idx in self.export_indices:
+                val = str(row[c_idx]) if c_idx < len(row) and str(row[c_idx]).strip() != "" else "0"
+                self.table_content_layout.add_widget(ColorSafeLabel(text=val, bg_color=row_bg, size=(w_cell, h), size_hint=(None,None)))
+
+            act_box = BoxLayout(size=(w_act, h), size_hint=(None,None), spacing=dp(4), padding=dp(4))
+            act_box.add_widget(Button(text="ZAPISZ", on_press=lambda x, r=row: self.export_single_row(r), background_color=(0.2, 0.6, 0.2, 1)))
+            act_box.add_widget(Button(text="WYŚLIJ", on_press=lambda x, r=row: self.send_individual_from_table(r), background_color=(0.1, 0.5, 0.9, 1)))
+            self.table_content_layout.add_widget(act_box)
 
     def setup_clothes_container(self):
         self.sc_ref["clothes"].clear_widgets()
