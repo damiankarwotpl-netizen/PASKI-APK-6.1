@@ -1159,56 +1159,251 @@ class FutureApp(App):
         except:
             pass
 
-    def create_order_ui(self):
-        root = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
-        plant_ti = ModernInput(hint_text="Zakład")
-        root.add_widget(Label(text="Nowe zamówienie", bold=True))
-        root.add_widget(plant_ti)
-        workers_box = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(150))
-        workers_box.add_widget(Label(text="Wybierz pracowników do zamówienia (checkbox):"))
-        workers_grid = GridLayout(cols=1, size_hint_y=None)
-        workers_grid.bind(minimum_height=workers_grid.setter('height'))
-        rows = self.conn.execute("SELECT id, name, surname, plant FROM workers ORDER BY surname").fetchall()
-        sel = []
+    def _clothes_fetch_workers_for_order(self):
+        rows = self.conn.execute("""
+        SELECT w.id, w.name, w.surname, COALESCE(NULLIF(w.plant,''), cs.plant, '') AS plant,
+               cs.shirt, cs.hoodie, cs.pants, cs.jacket, cs.shoes
+        FROM workers w
+        LEFT JOIN clothes_sizes cs
+          ON lower(cs.name)=lower(w.name) AND lower(cs.surname)=lower(w.surname)
+        ORDER BY w.surname, w.name
+        """).fetchall()
+        out = []
         for r in rows:
+            out.append({
+                'id': r[0], 'name': r[1] or '', 'surname': r[2] or '', 'plant': r[3] or '',
+                'sizes': {'Koszulka': r[4] or '', 'Bluza': r[5] or '', 'Spodnie': r[6] or '', 'Kurtka': r[7] or '', 'Buty': r[8] or ''}
+            })
+        return out
+
+    def _collect_order_entries(self, selected_workers, worker_forms):
+        entries = []
+        for w in selected_workers:
+            frm = worker_forms.get(w['id'])
+            if not frm or not frm['use'].active:
+                continue
+            for item_name, qty_ti in frm['qty'].items():
+                try:
+                    qty = int(qty_ti.text.strip() or '0')
+                except Exception:
+                    qty = 0
+                if qty <= 0:
+                    continue
+                size = w['sizes'].get(item_name, '')
+                entries.append({
+                    'worker_id': w['id'],
+                    'name': w['name'],
+                    'surname': w['surname'],
+                    'item': item_name,
+                    'size': size,
+                    'qty': qty,
+                })
+        return entries
+
+    def _save_clothes_order_entries(self, plant, entries):
+        cur = self.conn.cursor()
+        cur.execute("INSERT INTO clothes_orders(date,plant,status) VALUES(?,?,?)",
+                    (datetime.now().strftime('%Y-%m-%d %H:%M'), plant, 'Nowe'))
+        order_id = cur.lastrowid
+        for e in entries:
+            cur.execute("""
+            INSERT INTO clothes_order_items(order_id, worker_id, name, surname, item, size, qty, issued)
+            VALUES(?,?,?,?,?,?,?,0)
+            """, (order_id, e['worker_id'], e['name'], e['surname'], e['item'], e['size'], e['qty']))
+        self.conn.commit()
+        return order_id
+
+    def _export_clothes_order_excels(self, order_id, entries):
+        if Workbook is None:
+            self.msg('Błąd', 'Brak openpyxl - nie można wygenerować raportów Excel')
+            return None, None
+        out_dir = Path('/storage/emulated/0/Documents/FutureExport') if platform == 'android' else Path('./exports')
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        summary = defaultdict(int)
+        for e in entries:
+            key = (e['item'], e.get('size') or '-')
+            summary[key] += int(e.get('qty') or 0)
+
+        wb1 = Workbook()
+        ws1 = wb1.active
+        ws1.title = 'Hurtownia'
+        ws1.append(['Pozycja', 'Rozmiar', 'Ilość'])
+        for (item, size), qty in sorted(summary.items(), key=lambda x: (x[0][0], x[0][1])):
+            ws1.append([item, size, qty])
+        try:
+            self.style_xlsx(ws1)
+        except Exception:
+            pass
+        p1 = out_dir / f'zamowienie_hurtownia_{order_id}.xlsx'
+        wb1.save(p1)
+
+        wb2 = Workbook()
+        ws2 = wb2.active
+        ws2.title = 'Wydanie'
+        ws2.append(['Pracownik', 'Pozycja', 'Rozmiar', 'Ilość'])
+        for e in sorted(entries, key=lambda x: (x['surname'], x['name'], x['item'])):
+            ws2.append([f"{e['name']} {e['surname']}", e['item'], e.get('size') or '-', e['qty']])
+        try:
+            self.style_xlsx(ws2)
+        except Exception:
+            pass
+        p2 = out_dir / f'raport_wydania_{order_id}.xlsx'
+        wb2.save(p2)
+        return str(p1), str(p2)
+
+    def create_order_ui(self):
+        workers = self._clothes_fetch_workers_for_order()
+        if not workers:
+            return self.msg('Info', 'Brak pracowników do zamówienia')
+
+        root = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
+        root.add_widget(Label(text='Nowe zamówienie odzieży', bold=True, size_hint_y=None, height=dp(36)))
+        plant_ti = ModernInput(hint_text='Zakład (filtr / opis zamówienia)')
+        search_ti = ModernInput(hint_text='Szukaj pracownika...')
+        root.add_widget(plant_ti)
+        root.add_widget(search_ti)
+
+        workers_grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(4))
+        workers_grid.bind(minimum_height=workers_grid.setter('height'))
+        selected = {}
+        rows_ui = []
+
+        def add_worker_row(w):
+            row = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(6))
             cb = CheckBox(size_hint_x=None, width=dp(40))
-            row = BoxLayout(size_hint_y=None, height=dp(36))
-            row.add_widget(Label(text=f"{r[1]} {r[2]} ({r[3]})"))
+            txt = Label(text=f"{w['name']} {w['surname']} ({w['plant'] or '-'})", halign='left')
+            txt.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            row.add_widget(txt)
             row.add_widget(cb)
+            rows_ui.append((w, row, cb))
             workers_grid.add_widget(row)
-            sel.append((r[0], cb))
-        scroll = ScrollView(size_hint=(1, None), size=(0, dp(140)))
-        scroll.add_widget(workers_grid)
-        root.add_widget(scroll)
-        item_ti = ModernInput(hint_text="Nazwa pozycji (np. koszulka)")
-        qty_ti = ModernInput(hint_text="Ilość", text="1")
-        root.add_widget(item_ti)
-        root.add_widget(qty_ti)
-        def run(_):
-            selected = [wid for wid,cb in sel if cb.active]
-            if not selected:
-                self.msg("Błąd", "Brak wybranych pracowników")
-                return
-            itemname = item_ti.text.strip()
-            try:
-                qty = int(qty_ti.text.strip())
-            except:
-                qty = 1
-            if not itemname:
-                self.msg("Błąd", "Podaj nazwę pozycji")
-                return
-            items = [{'name': itemname, 'qty': qty}]
-            order_id = self.clothes_create_order(selected, items, plant_ti.text.strip())
-            self.log(f"Created clothes order {order_id}")
+
+        for w in workers:
+            add_worker_row(w)
+
+        sc = ScrollView()
+        sc.add_widget(workers_grid)
+        root.add_widget(sc)
+
+        btns = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(6))
+
+        def refresh_filter(*_):
+            workers_grid.clear_widgets()
+            q = search_ti.text.lower().strip()
+            plant_q = plant_ti.text.lower().strip()
+            for w, row, cb in rows_ui:
+                txt = f"{w['name']} {w['surname']} {w['plant']}".lower()
+                if q and q not in txt:
+                    continue
+                if plant_q and plant_q not in (w['plant'] or '').lower() and plant_q not in txt:
+                    continue
+                workers_grid.add_widget(row)
+
+        def select_all_visible(_):
+            visible = set(workers_grid.children)
+            for w, row, cb in rows_ui:
+                if row in visible:
+                    cb.active = True
+
+        def select_plant(_):
+            ptxt = plant_ti.text.lower().strip()
+            if not ptxt:
+                return self.msg('Info', 'Podaj zakład, aby zaznaczyć wszystkich z zakładu')
+            for w, row, cb in rows_ui:
+                cb.active = ptxt in (w['plant'] or '').lower()
+
+        def next_step(_):
+            chosen = [w for w, row, cb in rows_ui if cb.active]
+            if not chosen:
+                return self.msg('Błąd', 'Wybierz co najmniej jednego pracownika')
+            p.dismiss()
+            self._create_order_items_ui(chosen, plant_ti.text.strip())
+
+        search_ti.bind(text=refresh_filter)
+        plant_ti.bind(text=refresh_filter)
+
+        btns.add_widget(ModernButton(text='Wszyscy widoczni', on_press=select_all_visible))
+        btns.add_widget(ModernButton(text='Wszyscy z zakładu', on_press=select_plant))
+        btns.add_widget(ModernButton(text='Dalej', on_press=next_step, bg_color=(0.16,0.56,0.33,1)))
+        root.add_widget(btns)
+
+        p = Popup(title='Nowe zamówienie - wybór pracowników', content=root, size_hint=(0.95,0.95))
+        p.open()
+
+    def _create_order_items_ui(self, selected_workers, plant):
+        root = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(8))
+        root.add_widget(Label(text='Konfiguracja zamówienia (ilości per pracownik)', bold=True, size_hint_y=None, height=dp(34)))
+
+        grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(8))
+        grid.bind(minimum_height=grid.setter('height'))
+        worker_forms = {}
+
+        for w in selected_workers:
+            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(210), padding=dp(8), spacing=dp(6))
+            with card.canvas.before:
+                Color(*COLOR_CARD)
+                rr = RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(10)])
+            card.bind(pos=lambda inst, val, r=rr: setattr(r, 'pos', val))
+            card.bind(size=lambda inst, val, r=rr: setattr(r, 'size', val))
+
+            head = BoxLayout(size_hint_y=None, height=dp(36))
+            cb = CheckBox(active=True, size_hint_x=None, width=dp(42))
+            hl = Label(text=f"{w['name']} {w['surname']} ({w['plant'] or '-'})", halign='left')
+            hl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            head.add_widget(hl)
+            head.add_widget(cb)
+            card.add_widget(head)
+
+            qty_map = {}
+            items_grid = GridLayout(cols=3, size_hint_y=None, height=dp(150), row_default_height=dp(30), row_force_default=True)
+            items_grid.add_widget(Label(text='Pozycja', bold=True))
+            items_grid.add_widget(Label(text='Rozmiar', bold=True))
+            items_grid.add_widget(Label(text='Ilość', bold=True))
+            for item_name in ['Koszulka', 'Bluza', 'Spodnie', 'Kurtka', 'Buty']:
+                size_txt = w['sizes'].get(item_name) or '-'
+                qti = TextInput(text='1', multiline=False, input_filter='int')
+                qty_map[item_name] = qti
+                items_grid.add_widget(Label(text=item_name))
+                items_grid.add_widget(Label(text=size_txt))
+                items_grid.add_widget(qti)
+            card.add_widget(items_grid)
+            worker_forms[w['id']] = {'use': cb, 'qty': qty_map}
+            grid.add_widget(card)
+
+        sc = ScrollView()
+        sc.add_widget(grid)
+        root.add_widget(sc)
+
+        bottom = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(6))
+
+        def order_all(_):
+            for frm in worker_forms.values():
+                frm['use'].active = True
+                for qti in frm['qty'].values():
+                    if not qti.text.strip() or qti.text.strip() == '0':
+                        qti.text = '1'
+
+        def save_order(_):
+            entries = self._collect_order_entries(selected_workers, worker_forms)
+            if not entries:
+                return self.msg('Błąd', 'Brak pozycji do zamówienia')
+            order_id = self._save_clothes_order_entries(plant, entries)
+            p1, p2 = self._export_clothes_order_excels(order_id, entries)
             p.dismiss()
             try:
                 scr = self.clothes_sm.get_screen('orders')
                 if hasattr(scr, 'refresh'):
                     scr.refresh()
-            except:
+            except Exception:
                 pass
-        root.add_widget(ModernButton(text="Utwórz zamówienie", on_press=run))
-        p = Popup(title="Nowe zamówienie", content=root, size_hint=(0.9,0.9))
+            self.msg('OK', f"Zamówienie #{order_id} zapisane.\nRaport hurtowni: {p1}\nRaport wydania: {p2}")
+
+        bottom.add_widget(ModernButton(text='Zamów wszystko', on_press=order_all))
+        bottom.add_widget(ModernButton(text='Zapisz i generuj Excel', on_press=save_order, bg_color=(0.16,0.56,0.33,1)))
+        root.add_widget(bottom)
+
+        p = Popup(title='Nowe zamówienie - pozycje i ilości', content=root, size_hint=(0.97,0.97))
         p.open()
 
     def clothes_order_details(self, order_id):
