@@ -82,20 +82,13 @@ class ModernButton(Button):
         with self.canvas.before:
             self.bg = Color(*self.base_color)
             self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=self.radius)
+            Color(1, 1, 1, 0.12)
+            self.border = Line(rounded_rectangle=(self.x, self.y, self.width, self.height, dp(12)), width=1)
         self.bind(pos=self._update, size=self._update, state=self._update_state)
 
     def _update(self, *args):
         self.rect.pos, self.rect.size = self.pos, self.size
         self.border.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(12))
-
-    def _update_state(self, *args):
-        factor = 0.82 if self.state == 'down' else 1.0
-        self.bg.rgba = (
-            min(1, self.base_color[0] * factor),
-            min(1, self.base_color[1] * factor),
-            min(1, self.base_color[2] * factor),
-            self.base_color[3],
-        )
 
     def _update_state(self, *args):
         factor = 0.82 if self.state == 'down' else 1.0
@@ -404,6 +397,10 @@ class FutureApp(App):
             pass
         try:
             self.conn.execute("ALTER TABLE contacts ADD COLUMN shoes_size TEXT")
+        except:
+            pass
+        try:
+            self.conn.execute("ALTER TABLE contacts ADD COLUMN notes TEXT")
         except:
             pass
         self.conn.execute("""
@@ -1553,22 +1550,52 @@ class FutureApp(App):
 
     def setup_contacts_ui(self):
         self.sc_ref["contacts"].clear_widgets()
-        l, top = BoxLayout(orientation="vertical", padding=dp(10)), BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5))
-        self.ti_cs = TextInput(hint_text="Szukaj..."); self.ti_cs.bind(text=self.refresh_contacts_list); top.add_widget(self.ti_cs)
-        top.add_widget(Button(text="+", size_hint_x=0.15, on_press=lambda x: self.form_contact())); top.add_widget(Button(text="Wróć", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
+        l, top = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8)), BoxLayout(size_hint_y=None, height=dp(110), spacing=dp(6), orientation='vertical')
+        search_row = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(5))
+        self.ti_cs = TextInput(hint_text="Szukaj po imieniu, nazwisku, email, telefonie...")
+        self.ti_cs.bind(text=self.refresh_contacts_list)
+        search_row.add_widget(self.ti_cs)
+        search_row.add_widget(Button(text="+", size_hint_x=0.15, on_press=lambda x: self.form_contact()))
+        search_row.add_widget(Button(text="Wróć", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
+
+        filter_row = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(5))
+        self.ti_cs_workplace = TextInput(hint_text="Filtr zakład pracy")
+        self.ti_cs_workplace.bind(text=self.refresh_contacts_list)
+        self.ti_cs_city = TextInput(hint_text="Filtr adres / mieszkanie")
+        self.ti_cs_city.bind(text=self.refresh_contacts_list)
+        filter_row.add_widget(self.ti_cs_workplace)
+        filter_row.add_widget(self.ti_cs_city)
+
+        top.add_widget(search_row)
+        top.add_widget(filter_row)
         self.c_ls = GridLayout(cols=1, size_hint_y=None, spacing=dp(10)); self.c_ls.bind(minimum_height=self.c_ls.setter('height'))
         sc = ScrollView(); sc.add_widget(self.c_ls); l.add_widget(top); l.add_widget(sc); self.sc_ref["contacts"].add_widget(l)
 
     def refresh_contacts_list(self, *args):
         self.c_ls.clear_widgets(); sv = self.ti_cs.text.lower()
-        rows = self.conn.execute("SELECT name, surname, email, pesel, phone, workplace, apartment FROM contacts ORDER BY surname ASC").fetchall()
+        sv_workplace = self.ti_cs_workplace.text.lower() if hasattr(self, 'ti_cs_workplace') else ""
+        sv_city = self.ti_cs_city.text.lower() if hasattr(self, 'ti_cs_city') else ""
+        rows = self.conn.execute("SELECT name, surname, email, pesel, phone, workplace, apartment, notes FROM contacts ORDER BY surname ASC").fetchall()
         for d in rows:
-            if sv and sv not in f"{d[0]} {d[1]} {d[2]}".lower(): continue
-            r = BoxLayout(size_hint_y=None, height=dp(125), padding=dp(10))
+            searchable = f"{d[0]} {d[1]} {d[2]} {d[4]} {d[5]} {d[6]} {d[7]}".lower()
+            if sv and sv not in searchable:
+                continue
+            if sv_workplace and sv_workplace not in str(d[5]).lower():
+                continue
+            if sv_city and sv_city not in str(d[6]).lower():
+                continue
+            r = BoxLayout(size_hint_y=None, height=dp(155), padding=dp(10), spacing=dp(8))
             with r.canvas.before: Color(*COLOR_CARD); Rectangle(pos=r.pos, size=r.size)
             inf, acts = BoxLayout(orientation="vertical"), BoxLayout(size_hint_x=0.3, orientation="vertical", spacing=dp(4))
             inf.add_widget(Label(text=f"{d[0]} {d[1]}".title(), bold=True, halign="left", text_size=(dp(250),None)))
-            info_text = f"E: {d[2]}\nP: {d[3]}\nT: {d[4] if d[4] else '-'}\nAdres: {d[6] if d[6] else '-'}"
+            info_text = (
+                f"E: {d[2]}\n"
+                f"PESEL: {d[3] if d[3] else '-'}\n"
+                f"T: {d[4] if d[4] else '-'}\n"
+                f"Zakład: {d[5] if d[5] else '-'}\n"
+                f"Adres: {d[6] if d[6] else '-'}\n"
+                f"Notatka: {d[7] if d[7] else '-'}"
+            )
             inf.add_widget(Label(text=info_text, font_size='11sp', halign="left", text_size=(dp(250),None), color=(0.7,0.7,0.7,1)))
             r.add_widget(inf)
             qbox = self.contact_quick_actions(d[4], d[0], d[1])
@@ -1657,26 +1684,57 @@ class FutureApp(App):
             self.update_stats()
         px = Popup(title="Usuń?", content=BoxLayout(orientation="vertical", children=[ModernButton(text="USUŃ KONTAKT", on_press=pr, size_hint_y=None, height=dp(50))]), size_hint=(0.7,0.3)); px.open()
 
-    def form_contact(self, n="", s="", e="", pes="", ph="", workplace="", apartment=""):
+    def form_contact(self, n="", s="", e="", pes="", ph="", workplace="", apartment="", notes=""):
         b, f_ins = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)), [TextInput(text=str(n), hint_text="Imię"), TextInput(text=str(s), hint_text="Nazwisko"), TextInput(text=str(e), hint_text="Email"), TextInput(text=str(pes), hint_text="PESEL"), TextInput(text=str(ph), hint_text="Telefon")]
         for f in f_ins: b.add_widget(f)
         workplace_ti = TextInput(hint_text="Zakład pracy (np. Rybnik KWK Jankowice)", size_hint_y=None, height=dp(40), text=str(workplace))
         apartment_ti = TextInput(hint_text="Mieszkanie / adres", size_hint_y=None, height=dp(40), text=str(apartment))
-        b.add_widget(workplace_ti); b.add_widget(apartment_ti)
+        notes_ti = TextInput(hint_text="Notatki o kontakcie", size_hint_y=None, height=dp(70), multiline=True, text=str(notes))
+        b.add_widget(workplace_ti); b.add_widget(apartment_ti); b.add_widget(notes_ti)
         def save(_):
-            self.conn.execute("INSERT OR REPLACE INTO contacts (name,surname,email,pesel,phone,workplace,apartment) VALUES (?,?,?,?,?,?,?)",
+            if not f_ins[0].text.strip() or not f_ins[1].text.strip():
+                return self.msg("Błąd", "Imię i nazwisko są wymagane")
+            self.conn.execute("INSERT OR REPLACE INTO contacts (name,surname,email,pesel,phone,workplace,apartment,notes) VALUES (?,?,?,?,?,?,?,?)",
                 (f_ins[0].text.lower(),
                  f_ins[1].text.lower(),
                  f_ins[2].text.strip(),
                  f_ins[3].text.strip(),
                  f_ins[4].text.strip(),
                  workplace_ti.text.strip(),
-                 apartment_ti.text.strip()))
+                 apartment_ti.text.strip(),
+                 notes_ti.text.strip()))
             self.conn.commit()
             px.dismiss()
             self.refresh_contacts_list()
             self.update_stats()
         b.add_widget(ModernButton(text="ZAPISZ", on_press=save)); px = Popup(title="Kontakt", content=b, size_hint=(0.9, 0.85)); px.open()
+
+    def contact_quick_actions(self, phone, name, surname):
+        box = BoxLayout(size_hint_x=0.26, orientation='vertical', spacing=dp(4))
+        phone_txt = str(phone).strip() if phone else ""
+
+        def copy_phone(_):
+            if not phone_txt:
+                return self.msg("Info", "Kontakt nie ma telefonu")
+            try:
+                from kivy.core.clipboard import Clipboard
+                Clipboard.copy(phone_txt)
+                self.msg("OK", f"Skopiowano numer: {phone_txt}")
+            except Exception:
+                self.msg("Błąd", "Nie udało się skopiować numeru")
+
+        def copy_full_name(_):
+            full_name = f"{str(name).title()} {str(surname).title()}"
+            try:
+                from kivy.core.clipboard import Clipboard
+                Clipboard.copy(full_name)
+                self.msg("OK", f"Skopiowano: {full_name}")
+            except Exception:
+                self.msg("Błąd", "Nie udało się skopiować danych")
+
+        box.add_widget(ModernButton(text="Kopiuj tel", on_press=copy_phone))
+        box.add_widget(ModernButton(text="Kopiuj imię", on_press=copy_full_name, bg_color=(0.21,0.43,0.72,1)))
+        return box
 
     def clear_all_attachments(self, _):
         [self.global_attachments.clear(), self.update_stats(), self.log("Cleared attachments")]
