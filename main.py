@@ -76,20 +76,34 @@ class ModernButton(Button):
         self.background_normal = ""
         self.background_color = (0,0,0,0)
         self.color = COLOR_TEXT
-        self.bold, self.radius = True, [dp(12)]
+        self.bold = True
+        self.radius = [dp(12)]
+        self.base_color = bg_color
         with self.canvas.before:
-            Color(*bg_color)
+            self.bg = Color(*self.base_color)
             self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=self.radius)
-        self.bind(pos=self._update, size=self._update)
+        self.bind(pos=self._update, size=self._update, state=self._update_state)
+
     def _update(self, *args):
         self.rect.pos, self.rect.size = self.pos, self.size
+
+    def _update_state(self, *args):
+        factor = 0.82 if self.state == 'down' else 1.0
+        self.bg.rgba = (
+            min(1, self.base_color[0] * factor),
+            min(1, self.base_color[1] * factor),
+            min(1, self.base_color[2] * factor),
+            self.base_color[3],
+        )
 
 class ModernInput(TextInput):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.background_normal = self.background_active = ""
-        self.background_color = (0.15, 0.18, 0.25, 1)
+        self.background_color = (0.14, 0.17, 0.24, 1)
         self.foreground_color = COLOR_TEXT
+        self.cursor_color = COLOR_PRIMARY
+        self.hint_text_color = (0.7, 0.75, 0.82, 1)
         self.padding = [dp(12), dp(12)]
 
 class ColorSafeLabel(Label):
@@ -138,16 +152,39 @@ class ClothesSizesScreen(Screen):
             "SELECT id, name, surname, plant, shirt, hoodie, pants, jacket, shoes FROM clothes_sizes ORDER BY surname"
         ).fetchall()
         for r in rows:
-            box = BoxLayout(size_hint_y=None, height=dp(80), padding=dp(6), spacing=dp(8))
-            txt = f"{r[1]} {r[2]} ({r[3]})   K:{r[4]}   B:{r[5]}   S:{r[6]}   KUR:{r[7]}   BUT:{r[8]}"
-            lbl = Label(text=txt, size_hint_x=0.78, halign='left', valign='middle')
-            lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(12), None)))
-            btns = BoxLayout(size_hint_x=0.22, spacing=dp(6))
+            card = BoxLayout(size_hint_y=None, height=dp(190), padding=dp(10), spacing=dp(10))
+            with card.canvas.before:
+                Color(*COLOR_CARD)
+                card_rect = RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
+            card.bind(pos=lambda inst, val, rect=card_rect: setattr(rect, 'pos', val))
+            card.bind(size=lambda inst, val, rect=card_rect: setattr(rect, 'size', val))
+
+            info = BoxLayout(orientation='vertical', size_hint_x=0.76, spacing=dp(4))
+            full_name = f"{r[1]} {r[2]}"
+            head = Label(text=full_name, bold=True, font_size='18sp', halign='left', valign='middle', size_hint_y=None, height=dp(34))
+            head.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(8), None)))
+            info.add_widget(head)
+
+            details = [
+                f"Zakład: {r[3] if str(r[3]).strip() else '-'}",
+                f"Rozmiar koszulki: {r[4] if str(r[4]).strip() else '-'}",
+                f"Rozmiar bluzy: {r[5] if str(r[5]).strip() else '-'}",
+                f"Rozmiar spodni: {r[6] if str(r[6]).strip() else '-'}",
+                f"Rozmiar kurtki: {r[7] if str(r[7]).strip() else '-'}",
+                f"Rozmiar butów: {r[8] if str(r[8]).strip() else '-'}",
+            ]
+            for line in details:
+                lbl = Label(text=line, halign='left', valign='middle', size_hint_y=None, height=dp(22), color=(0.88, 0.9, 0.96, 1))
+                lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(8), None)))
+                info.add_widget(lbl)
+
+            btns = BoxLayout(orientation='vertical', size_hint_x=0.24, spacing=dp(8), padding=[0, dp(8), 0, dp(8)])
             btns.add_widget(ModernButton(text="Edytuj", on_press=lambda x, data=r: App.get_running_app().edit_clothes_size(data)))
             btns.add_widget(ModernButton(text="Usuń", bg_color=(0.7,0.1,0.1,1), on_press=lambda x, data=r: App.get_running_app().delete_clothes_size(data[0])))
-            box.add_widget(lbl)
-            box.add_widget(btns)
-            self.list_layout.add_widget(box)
+
+            card.add_widget(info)
+            card.add_widget(btns)
+            self.list_layout.add_widget(card)
 
 class ClothesOrdersScreen(Screen):
     def on_enter(self):
@@ -808,27 +845,82 @@ class FutureApp(App):
 
     def setup_ui_all(self):
         self.sc_ref["home"].clear_widgets()
-        root = BoxLayout(orientation="vertical", padding=[dp(10), dp(10), dp(10), dp(80)], spacing=dp(10))
+        root = BoxLayout(orientation="vertical", padding=[dp(12), dp(12), dp(12), dp(80)], spacing=dp(10))
         lbl = Label(text="FUTURE ULTIMATE v20", font_size='34sp', bold=True, color=COLOR_PRIMARY, size_hint_y=None, height=dp(70))
+        sub = Label(text="Panel główny aplikacji", font_size='14sp', color=(0.72, 0.78, 0.9, 1), size_hint_y=None, height=dp(24))
         root.add_widget(lbl)
+        root.add_widget(sub)
         sv = ScrollView(size_hint=(1,1))
         grid = GridLayout(cols=2, spacing=dp(12), padding=dp(10), size_hint_y=None)
         grid.bind(minimum_height=grid.setter('height'))
         btn_props = dict(size_hint_y=None, height=dp(80))
-        grid.add_widget(ModernButton(text="Kontakty", on_press=lambda x: [self.refresh_contacts_list(), setattr(self.sm, 'current', 'contacts')], **btn_props))
-        grid.add_widget(ModernButton(text="Samochody", on_press=lambda x: setattr(self.sm, 'current', 'cars'), **btn_props))
-        grid.add_widget(ModernButton(text="Ubranie robocze", on_press=lambda x: setattr(self.sm, 'current', 'clothes'), **btn_props))
-        grid.add_widget(ModernButton(text="Paski", on_press=lambda x: setattr(self.sm, 'current', 'paski'), **btn_props))
-        grid.add_widget(ModernButton(text="Pracownicy", on_press=lambda x: setattr(self.sm, 'current', 'pracownicy'), **btn_props))
-        grid.add_widget(ModernButton(text="Zakłady", on_press=lambda x: setattr(self.sm, 'current', 'zaklady'), **btn_props))
-        grid.add_widget(ModernButton(text="Ustawienia", on_press=lambda x: setattr(self.sm, 'current', 'settings'), **btn_props))
-        grid.add_widget(ModernButton(text="Wyjście", on_press=lambda x: App.get_running_app().stop(), bg_color=(0.6,0.1,0.1,1), **btn_props))
+        grid.add_widget(ModernButton(text="Kontakty", bg_color=(0.13,0.48,0.82,1), on_press=lambda x: [self.refresh_contacts_list(), setattr(self.sm, 'current', 'contacts')], **btn_props))
+        grid.add_widget(ModernButton(text="Samochody", bg_color=(0.27,0.53,0.86,1), on_press=lambda x: setattr(self.sm, 'current', 'cars'), **btn_props))
+        grid.add_widget(ModernButton(text="Ubranie robocze", bg_color=(0.17,0.58,0.76,1), on_press=lambda x: setattr(self.sm, 'current', 'clothes'), **btn_props))
+        grid.add_widget(ModernButton(text="Paski", bg_color=(0.1,0.62,0.68,1), on_press=lambda x: setattr(self.sm, 'current', 'paski'), **btn_props))
+        grid.add_widget(ModernButton(text="Pracownicy", bg_color=(0.22,0.5,0.73,1), on_press=lambda x: setattr(self.sm, 'current', 'pracownicy'), **btn_props))
+        grid.add_widget(ModernButton(text="Zakłady", bg_color=(0.2,0.45,0.7,1), on_press=lambda x: setattr(self.sm, 'current', 'zaklady'), **btn_props))
+        grid.add_widget(ModernButton(text="Ustawienia", bg_color=(0.34,0.42,0.74,1), on_press=lambda x: setattr(self.sm, 'current', 'settings'), **btn_props))
+        grid.add_widget(ModernButton(text="Wyjście", on_press=lambda x: App.get_running_app().stop(), bg_color=(0.65,0.18,0.2,1), **btn_props))
         sv.add_widget(grid)
         root.add_widget(sv)
         self.sc_ref["home"].add_widget(root)
+        self.setup_table_ui()
         self.setup_email_ui(); self.setup_smtp_ui(); self.setup_tmpl_ui(); self.setup_contacts_ui(); self.setup_report_ui()
         self.setup_cars_ui(); self.setup_paski_ui(); self.setup_pracownicy_ui(); self.setup_zaklady_ui(); self.setup_settings_ui()
         self.setup_clothes_container()
+
+    def setup_table_ui(self):
+        self.sc_ref["table"].clear_widgets()
+        root = BoxLayout(orientation="vertical")
+        menu = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5), padding=dp(5))
+        self.ti_tab_search = ModernInput(hint_text="Szukaj w tabeli...")
+        self.ti_tab_search.bind(text=self.filter_table)
+        menu.add_widget(self.ti_tab_search)
+        menu.add_widget(Button(text="KOLUMNY", size_hint_x=0.2, on_press=self.popup_columns))
+        menu.add_widget(Button(text="WRÓĆ", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'paski')))
+
+        hs = ScrollView(size_hint_y=None, height=dp(55), do_scroll_y=False)
+        self.table_header_layout = GridLayout(rows=1, size_hint=(None, None), height=dp(55))
+        hs.add_widget(self.table_header_layout)
+
+        ds = ScrollView(do_scroll_x=True, do_scroll_y=True)
+        self.table_content_layout = GridLayout(size_hint=(None, None))
+        self.table_content_layout.bind(minimum_height=self.table_content_layout.setter('height'), minimum_width=self.table_content_layout.setter('width'))
+        ds.add_widget(self.table_content_layout)
+        ds.bind(scroll_x=lambda inst, val: setattr(hs, 'scroll_x', val))
+
+        root.add_widget(menu)
+        root.add_widget(hs)
+        root.add_widget(ds)
+        self.sc_ref["table"].add_widget(root)
+
+    def refresh_table(self):
+        self.table_content_layout.clear_widgets()
+        self.table_header_layout.clear_widgets()
+        if not self.filtered_data:
+            return
+        w_cell, w_act, h = dp(170), dp(220), dp(55)
+        headers = [self.full_data[0][i] for i in self.export_indices]
+
+        total_w = (len(headers) * w_cell) + w_act
+        self.table_header_layout.cols = self.table_content_layout.cols = len(headers) + 1
+        self.table_header_layout.width = self.table_content_layout.width = total_w
+
+        for head in headers:
+            self.table_header_layout.add_widget(ColorSafeLabel(text=str(head), bg_color=COLOR_HEADER, bold=True, size=(w_cell, h), size_hint=(None,None), text_color=(0,0,0,1)))
+        self.table_header_layout.add_widget(ColorSafeLabel(text="AKCJE", bg_color=COLOR_HEADER, bold=True, size=(w_act, h), size_hint=(None,None), text_color=(0,0,0,1)))
+
+        for r_idx, row in enumerate(self.filtered_data[1:]):
+            row_bg = COLOR_ROW_A if r_idx % 2 == 0 else COLOR_ROW_B
+            for c_idx in self.export_indices:
+                val = str(row[c_idx]) if c_idx < len(row) and str(row[c_idx]).strip() != "" else "0"
+                self.table_content_layout.add_widget(ColorSafeLabel(text=val, bg_color=row_bg, size=(w_cell, h), size_hint=(None,None)))
+
+            act_box = BoxLayout(size=(w_act, h), size_hint=(None,None), spacing=dp(4), padding=dp(4))
+            act_box.add_widget(Button(text="ZAPISZ", on_press=lambda x, r=row: self.export_single_row(r), background_color=(0.2, 0.6, 0.2, 1)))
+            act_box.add_widget(Button(text="WYŚLIJ", on_press=lambda x, r=row: self.send_individual_from_table(r), background_color=(0.1, 0.5, 0.9, 1)))
+            self.table_content_layout.add_widget(act_box)
 
     def setup_clothes_container(self):
         self.sc_ref["clothes"].clear_widgets()
@@ -1571,16 +1663,16 @@ class FutureApp(App):
     def setup_cars_ui(self):
         self.sc_ref["cars"].clear_widgets()
         b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
-        b.add_widget(Label(text="Moduł Samochody", bold=True))
-        b.add_widget(Label(text="Placeholder - tu będzie rozwijany moduł Samochody"))
+        b.add_widget(Label(text="Moduł Samochody", bold=True, font_size="22sp", color=COLOR_PRIMARY))
+        b.add_widget(Label(text="Panel w przygotowaniu", color=(0.75,0.78,0.84,1)))
         b.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home')))
         self.sc_ref["cars"].add_widget(b)
 
     def setup_paski_ui(self):
         self.sc_ref["paski"].clear_widgets()
         l = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
-        header = BoxLayout(size_hint_y=None, height=dp(40))
-        header.add_widget(Label(text="Moduł Paski", bold=True))
+        header = BoxLayout(size_hint_y=None, height=dp(52))
+        header.add_widget(Label(text="Moduł Paski", bold=True, font_size="24sp", color=COLOR_PRIMARY))
         l.add_widget(header)
         ab = BoxLayout(size_hint_y=None, height=dp(45), spacing=dp(10))
         self.cb_paski_auto = CheckBox(size_hint_x=None, width=dp(45))
@@ -1606,23 +1698,23 @@ class FutureApp(App):
     def setup_pracownicy_ui(self):
         self.sc_ref["pracownicy"].clear_widgets()
         b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
-        b.add_widget(Label(text="Moduł Pracownicy", bold=True))
-        b.add_widget(Label(text="Placeholder - moduł Pracownicy do późniejszego rozwinięcia"))
+        b.add_widget(Label(text="Moduł Pracownicy", bold=True, font_size="22sp", color=COLOR_PRIMARY))
+        b.add_widget(Label(text="Panel w przygotowaniu", color=(0.75,0.78,0.84,1)))
         b.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home')))
         self.sc_ref["pracownicy"].add_widget(b)
 
     def setup_zaklady_ui(self):
         self.sc_ref["zaklady"].clear_widgets()
         b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
-        b.add_widget(Label(text="Moduł Zakłady", bold=True))
-        b.add_widget(Label(text="Placeholder - moduł Zakłady do późniejszego rozwinięcia"))
+        b.add_widget(Label(text="Moduł Zakłady", bold=True, font_size="22sp", color=COLOR_PRIMARY))
+        b.add_widget(Label(text="Panel w przygotowaniu", color=(0.75,0.78,0.84,1)))
         b.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home')))
         self.sc_ref["zaklady"].add_widget(b)
 
     def setup_settings_ui(self):
         self.sc_ref["settings"].clear_widgets()
         l = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
-        l.add_widget(Label(text="Ustawienia", bold=True))
+        l.add_widget(Label(text="Ustawienia", bold=True, font_size="24sp", color=COLOR_PRIMARY))
         l.add_widget(ModernButton(text="Dodaj bazę danych", on_press=lambda x: self.open_picker("book"), height=dp(50), size_hint_y=None))
         l.add_widget(ModernButton(text="Ustawienia SMTP", on_press=lambda x: setattr(self.sm, 'current', 'smtp'), height=dp(50), size_hint_y=None))
         l.add_widget(ModernButton(text="Edytuj szablon email", on_press=lambda x: setattr(self.sm, 'current', 'tmpl'), height=dp(50), size_hint_y=None))
