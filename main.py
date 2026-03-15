@@ -43,20 +43,43 @@ class ModernButton(Button):
     def __init__(self, bg_color=COLOR_PRIMARY, **kwargs):
         super().__init__(**kwargs)
         self._bg_color = bg_color
+        self._normal_bg_color = bg_color
+        self._pressed_bg_color = tuple(max(0.0, c * 0.82) for c in bg_color[:3]) + (bg_color[3],)
         self.background_normal = ""
-        self.background_color = (0,0,0,0)
+        self.background_down = ""
+        self.background_color = (0, 0, 0, 0)
         self.color = COLOR_TEXT
-        self.bold, self.radius = True, [dp(12)]
+        if hasattr(self, 'bold'):
+            self.bold = True
+        self.font_size = kwargs.get('font_size', '15sp')
+        self.radius = [dp(12)]
+        self.padding = [dp(10), dp(10)]
         with self.canvas.before:
             self.bg_instruction = Color(*bg_color)
             self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=self.radius)
-        self.bind(pos=self._update, size=self._update)
+        self.bind(pos=self._update, size=self._update, disabled=self._on_disabled)
+
     def _update(self, *args):
         self.rect.pos, self.rect.size = self.pos, self.size
 
+    def _on_disabled(self, *_):
+        self.opacity = 0.65 if self.disabled else 1
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos) and not self.disabled:
+            self.bg_instruction.rgba = self._pressed_bg_color
+        return super().on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        self.bg_instruction.rgba = self._normal_bg_color
+        return super().on_touch_up(touch)
+
     def set_bg_color(self, rgba):
         self._bg_color = rgba
+        self._normal_bg_color = rgba
+        self._pressed_bg_color = tuple(max(0.0, c * 0.82) for c in rgba[:3]) + (rgba[3],)
         self.bg_instruction.rgba = rgba
+
 
 class ModernInput(TextInput):
     def __init__(self, **kwargs):
@@ -64,16 +87,25 @@ class ModernInput(TextInput):
         self.background_normal = self.background_active = ""
         self.background_color = (0.15, 0.18, 0.25, 1)
         self.foreground_color = COLOR_TEXT
+        if hasattr(self, 'hint_text_color'):
+            self.hint_text_color = (0.72, 0.76, 0.85, 1)
+        if hasattr(self, 'cursor_color'):
+            self.cursor_color = COLOR_TEXT
+        self.font_size = '15sp'
         self.padding = [dp(12), dp(12)]
+
 
 class ColorSafeLabel(Label):
     def __init__(self, bg_color=(1,1,1,1), text_color=(1,1,1,1), **kwargs):
+        kwargs.setdefault('halign', 'left')
+        kwargs.setdefault('valign', 'middle')
         super().__init__(**kwargs)
         self.color = text_color
         with self.canvas.before:
             Color(*bg_color)
             self.rect = Rectangle(size=self.size, pos=self.pos)
         self.bind(size=self._update, pos=self._update)
+
     def _update(self, inst, val):
         self.rect.size, self.rect.pos = self.size, self.pos
         self.text_size = (self.width - dp(10), None)
@@ -300,7 +332,8 @@ class FutureApp(App):
         if platform == "android":
             from android.permissions import request_permissions, Permission
             request_permissions([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
-        if not os.path.exists(self.user_data_dir): os.makedirs(self.user_data_dir, exist_ok=True)
+        if not os.path.exists(self.user_data_dir):
+            os.makedirs(self.user_data_dir, exist_ok=True)
 
         self.full_data, self.filtered_data, self.export_indices = [], [], []
         self.global_attachments, self.queue = [], []
@@ -317,11 +350,18 @@ class FutureApp(App):
         except Exception as exc:
             print(f"[WARN] Unable to create log file: {exc}")
 
-        self.init_db()
-
-        self.sm = ScreenManager(transition=SlideTransition())
-        self.add_screens()
-        return self.sm
+        try:
+            self.init_db()
+            self.sm = ScreenManager(transition=SlideTransition())
+            self.add_screens()
+            return self.sm
+        except Exception as exc:
+            err = traceback.format_exc()
+            try:
+                self.log(f"Startup crash guarded: {exc}\n{err}")
+            except Exception:
+                print(err)
+            return self.build_startup_fallback_ui(exc)
 
     def log(self, txt):
         """Log events to memory and on-disk file without crashing the UI."""
@@ -335,6 +375,25 @@ class FutureApp(App):
                 f.write(line)
         except Exception as exc:
             print(f"[WARN] Logging failed: {exc}")
+
+    def build_startup_fallback_ui(self, exc):
+        sm = ScreenManager(transition=SlideTransition())
+        scr = Screen(name='startup_error')
+        root = BoxLayout(orientation='vertical', padding=dp(16), spacing=dp(10))
+        root.add_widget(Label(text='Aplikacja uruchomiona w trybie awaryjnym', bold=True, font_size='20sp'))
+        msg = Label(
+            text=f'Wykryto błąd podczas startu: {exc}',
+            halign='left',
+            valign='middle',
+            color=(1, 0.8, 0.8, 1),
+        )
+        msg.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(8), None)))
+        root.add_widget(msg)
+        root.add_widget(Label(text='Sprawdź logi aplikacji i zaktualizuj APK.', color=(0.85, 0.9, 1, 1)))
+        scr.add_widget(root)
+        sm.add_widget(scr)
+        sm.current = 'startup_error'
+        return sm
 
     def _run_db(self, query, params=(), *, commit=False, fetch=False, fetchone=False, silent=False):
         """Common DB wrapper used to reduce duplicated try/except blocks."""
@@ -834,22 +893,38 @@ class FutureApp(App):
     def setup_ui_all(self):
         self.sc_ref["home"].clear_widgets()
         root = BoxLayout(orientation="vertical", padding=[dp(10), dp(10), dp(10), dp(80)], spacing=dp(10))
-        header = BoxLayout(size_hint_y=None, height=dp(70), spacing=dp(8))
-        lbl = Label(text="FUTURE ULTIMATE v20", font_size='34sp', bold=True, color=COLOR_PRIMARY)
+
+        header = BoxLayout(size_hint_y=None, height=dp(76), spacing=dp(8), padding=[dp(4), 0, dp(4), 0])
+        title_wrap = BoxLayout(orientation='vertical', spacing=dp(2))
+        lbl = Label(text="FUTURE ULTIMATE v20", font_size='30sp', bold=True, color=COLOR_PRIMARY, halign='left', valign='middle')
+        lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', val))
+        sub_lbl = Label(text="Panel główny", font_size='13sp', color=(0.75, 0.8, 0.9, 1), halign='left', valign='middle')
+        sub_lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', val))
+        title_wrap.add_widget(lbl)
+        title_wrap.add_widget(sub_lbl)
+
         admin_btn = ModernButton(
             text="ADMIN",
             size_hint=(None, None),
-            size=(dp(90), dp(36)),
+            size=(dp(94), dp(38)),
             bg_color=(0.35, 0.25, 0.7, 1),
             on_press=lambda x: self.show_admin_access_popup(),
         )
-        header.add_widget(lbl)
+        header.add_widget(title_wrap)
         header.add_widget(admin_btn)
         root.add_widget(header)
-        sv = ScrollView(size_hint=(1,1))
+
+        menu_card = BoxLayout(orientation='vertical', padding=dp(8), spacing=dp(8))
+        with menu_card.canvas.before:
+            Color(*COLOR_CARD)
+            menu_card.bg_rect = RoundedRectangle(pos=menu_card.pos, size=menu_card.size, radius=[dp(14)])
+        menu_card.bind(pos=lambda inst, val: setattr(inst.bg_rect, 'pos', val), size=lambda inst, val: setattr(inst.bg_rect, 'size', val))
+
+        sv = ScrollView(size_hint=(1, 1), bar_width=dp(6))
         grid = GridLayout(cols=2, spacing=dp(12), padding=dp(10), size_hint_y=None)
         grid.bind(minimum_height=grid.setter('height'))
-        btn_props = dict(size_hint_y=None, height=dp(80))
+        btn_props = dict(size_hint_y=None, height=dp(82), font_size='16sp')
+
         grid.add_widget(ModernButton(text="Kontakty", on_press=lambda x: [self.refresh_contacts_list(), setattr(self.sm, 'current', 'contacts')], **btn_props))
         grid.add_widget(ModernButton(text="Samochody", on_press=lambda x: setattr(self.sm, 'current', 'cars'), **btn_props))
         grid.add_widget(ModernButton(text="Ubranie robocze", on_press=lambda x: setattr(self.sm, 'current', 'clothes'), **btn_props))
@@ -857,9 +932,11 @@ class FutureApp(App):
         grid.add_widget(ModernButton(text="Pracownicy", on_press=lambda x: setattr(self.sm, 'current', 'pracownicy'), **btn_props))
         grid.add_widget(ModernButton(text="Zakłady", on_press=lambda x: setattr(self.sm, 'current', 'zaklady'), **btn_props))
         grid.add_widget(ModernButton(text="Ustawienia", on_press=lambda x: setattr(self.sm, 'current', 'settings'), **btn_props))
-        grid.add_widget(ModernButton(text="Wyjście", on_press=lambda x: App.get_running_app().stop(), bg_color=(0.6,0.1,0.1,1), **btn_props))
+        grid.add_widget(ModernButton(text="Wyjście", on_press=lambda x: App.get_running_app().stop(), bg_color=(0.6, 0.1, 0.1, 1), **btn_props))
+
         sv.add_widget(grid)
-        root.add_widget(sv)
+        menu_card.add_widget(sv)
+        root.add_widget(menu_card)
         self.sc_ref["home"].add_widget(root)
         self.setup_email_ui(); self.setup_smtp_ui(); self.setup_tmpl_ui(); self.setup_contacts_ui(); self.setup_report_ui()
         self.setup_cars_ui(); self.setup_paski_ui(); self.setup_pracownicy_ui(); self.setup_zaklady_ui(); self.setup_settings_ui()
@@ -1636,50 +1713,135 @@ class FutureApp(App):
                 self.update_stats()
         activity.bind(on_activity_result=cb); PA.mActivity.startActivityForResult(intent, 1001)
 
+    def build_screen_shell(self, title, subtitle="", back_to='home'):
+        shell = BoxLayout(orientation="vertical", padding=dp(14), spacing=dp(10))
+
+        header = BoxLayout(size_hint_y=None, height=dp(78), spacing=dp(8), padding=[dp(8), dp(4), dp(8), dp(4)])
+        with header.canvas.before:
+            Color(*COLOR_HEADER)
+            header.bg_rect = RoundedRectangle(pos=header.pos, size=header.size, radius=[dp(14)])
+        header.bind(pos=lambda inst, val: setattr(inst.bg_rect, 'pos', val), size=lambda inst, val: setattr(inst.bg_rect, 'size', val))
+
+        labels = BoxLayout(orientation='vertical', spacing=dp(2))
+        t = Label(text=title, bold=True, font_size='22sp', color=COLOR_TEXT, halign='left', valign='middle')
+        t.bind(size=lambda inst, val: setattr(inst, 'text_size', val))
+        labels.add_widget(t)
+        if subtitle:
+            st = Label(text=subtitle, font_size='12sp', color=(0.82, 0.87, 0.96, 1), halign='left', valign='middle')
+            st.bind(size=lambda inst, val: setattr(inst, 'text_size', val))
+            labels.add_widget(st)
+
+        back_btn = ModernButton(text="Powrót", size_hint=(None, None), size=(dp(110), dp(42)), bg_color=(0.32, 0.34, 0.4, 1), on_press=lambda x: setattr(self.sm, 'current', back_to))
+        header.add_widget(labels)
+        header.add_widget(back_btn)
+
+        content = BoxLayout(orientation='vertical', padding=dp(8), spacing=dp(10))
+        with content.canvas.before:
+            Color(*COLOR_CARD)
+            content.bg_rect = RoundedRectangle(pos=content.pos, size=content.size, radius=[dp(16)])
+        content.bind(pos=lambda inst, val: setattr(inst.bg_rect, 'pos', val), size=lambda inst, val: setattr(inst.bg_rect, 'size', val))
+
+        shell.add_widget(header)
+        shell.add_widget(content)
+        return shell, content
+
+    def styled_popup(self, title, content, size_hint=(0.9, 0.6)):
+        try:
+            return Popup(title=title, content=content, size_hint=size_hint, separator_color=COLOR_PRIMARY)
+        except TypeError:
+            # Fallback for older Kivy builds that do not expose separator_color in ctor.
+            return Popup(title=title, content=content, size_hint=size_hint)
+
     def setup_tmpl_ui(self):
         self.sc_ref["tmpl"].clear_widgets()
-        l, ti_s, ti_b = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10)), ModernInput(hint_text="Temat {Imię}"), ModernInput(hint_text="Treść...", multiline=True)
-        ts, tb = self.conn.execute("SELECT val FROM settings WHERE key='t_sub'").fetchone(), self.conn.execute("SELECT val FROM settings WHERE key='t_body'").fetchone()
+        shell, content = self.build_screen_shell("Szablon e-mail", "Konfiguracja domyślnej treści wiadomości", back_to='email')
+
+        ti_s = ModernInput(hint_text="Temat {Imię}", size_hint_y=None, height=dp(48))
+        ti_b = ModernInput(hint_text="Treść...", multiline=True)
+        ts = self.conn.execute("SELECT val FROM settings WHERE key='t_sub'").fetchone()
+        tb = self.conn.execute("SELECT val FROM settings WHERE key='t_body'").fetchone()
         ti_s.text, ti_b.text = (ts[0] if ts else ""), (tb[0] if tb else "")
-        l.add_widget(Label(text="SZABLON EMAIL", bold=True)); l.add_widget(ti_s); l.add_widget(ti_b)
-        l.add_widget(ModernButton(text="ZAPISZ", on_press=lambda x: [self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_sub',ti_s.text)), self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_body',ti_b.text)), self.conn.commit(), self.msg("OK","Wzór zapisany")]))
-        l.add_widget(ModernButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'email'))); self.sc_ref["tmpl"].add_widget(l)
+
+        content.add_widget(Label(text="Wprowadź temat i treść szablonu", size_hint_y=None, height=dp(28), color=(0.85, 0.88, 0.95, 1)))
+        content.add_widget(ti_s)
+        content.add_widget(ti_b)
+        content.add_widget(ModernButton(
+            text="Zapisz szablon",
+            size_hint_y=None,
+            height=dp(52),
+            on_press=lambda x: [
+                self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_sub', ti_s.text)),
+                self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_body', ti_b.text)),
+                self.conn.commit(),
+                self.msg("OK", "Wzór zapisany"),
+            ],
+        ))
+        self.sc_ref["tmpl"].add_widget(shell)
 
     def setup_contacts_ui(self):
         self.sc_ref["contacts"].clear_widgets()
-        l, top = BoxLayout(orientation="vertical", padding=dp(10)), BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5))
-        self.ti_cs = TextInput(hint_text="Szukaj..."); self.ti_cs.bind(text=self.refresh_contacts_list); top.add_widget(self.ti_cs)
-        top.add_widget(Button(text="+", size_hint_x=0.15, on_press=lambda x: self.form_contact()))
-        top.add_widget(Button(text="Wróć", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home')))
-        self.c_ls = GridLayout(cols=1, size_hint_y=None, spacing=dp(10)); self.c_ls.bind(minimum_height=self.c_ls.setter('height'))
-        sc = ScrollView(); sc.add_widget(self.c_ls); l.add_widget(top); l.add_widget(sc); self.sc_ref["contacts"].add_widget(l)
+        shell, content = self.build_screen_shell("Kontakty", "Baza pracowników i danych kontaktowych")
+
+        top = BoxLayout(size_hint_y=None, height=dp(56), spacing=dp(8))
+        self.ti_cs = ModernInput(hint_text="Szukaj kontaktu po imieniu, nazwisku, e-mail...")
+        top.add_widget(self.ti_cs)
+        top.add_widget(ModernButton(text="+ Dodaj", size_hint_x=0.22, on_press=lambda x: self.form_contact()))
+
+        self.c_ls = GridLayout(cols=1, size_hint_y=None, spacing=dp(10), padding=[dp(2), dp(2), dp(2), dp(8)])
+        self.c_ls.bind(minimum_height=self.c_ls.setter('height'))
+        self.ti_cs.bind(text=self.refresh_contacts_list)
+        sc = ScrollView()
+        sc.add_widget(self.c_ls)
+        content.add_widget(top)
+        content.add_widget(sc)
+        self.sc_ref["contacts"].add_widget(shell)
 
     def refresh_contacts_list(self, *args):
-        self.c_ls.clear_widgets(); sv = self.ti_cs.text.lower()
+        self.c_ls.clear_widgets()
+        sv = self.ti_cs.text.lower().strip() if hasattr(self, 'ti_cs') else ""
         rows = self.conn.execute("SELECT name, surname, email, pesel, phone, workplace, apartment FROM contacts ORDER BY surname ASC").fetchall()
+
         for d in rows:
-            if sv and sv not in f"{d[0]} {d[1]} {d[2]}".lower(): continue
-            r = BoxLayout(size_hint_y=None, height=dp(125), padding=dp(10))
-            with r.canvas.before: Color(*COLOR_CARD); Rectangle(pos=r.pos, size=r.size)
-            inf, acts = BoxLayout(orientation="vertical"), BoxLayout(size_hint_x=0.3, orientation="vertical", spacing=dp(4))
-            inf.add_widget(Label(text=f"{d[0]} {d[1]}".title(), bold=True, halign="left", text_size=(dp(250),None)))
-            info_text = f"E: {d[2]}\\nP: {d[3]}\\nT: {d[4] if d[4] else '-'}\\nAdres: {d[6] if d[6] else '-'}"
-            inf.add_widget(Label(text=info_text, font_size='11sp', halign="left", text_size=(dp(250),None), color=(0.7,0.7,0.7,1)))
+            if sv and sv not in f"{d[0]} {d[1]} {d[2]}".lower():
+                continue
+
+            r = BoxLayout(size_hint_y=None, height=dp(130), padding=dp(10), spacing=dp(10))
+            with r.canvas.before:
+                Color(*COLOR_ROW_B)
+                r.bg_rect = RoundedRectangle(pos=r.pos, size=r.size, radius=[dp(12)])
+            r.bind(pos=lambda inst, val: setattr(inst.bg_rect, 'pos', val), size=lambda inst, val: setattr(inst.bg_rect, 'size', val))
+
+            inf = BoxLayout(orientation="vertical", spacing=dp(2))
+            title = Label(text=f"{d[0]} {d[1]}".title(), bold=True, halign="left", valign='middle', font_size='16sp')
+            title.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width, None)))
+            inf.add_widget(title)
+            info_text = f"E-mail: {d[2]}\nPESEL: {d[3]}\nTelefon: {d[4] if d[4] else '-'}\nAdres: {d[6] if d[6] else '-'}"
+            details = Label(text=info_text, font_size='12sp', halign="left", valign='top', color=(0.78, 0.82, 0.9, 1))
+            details.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width, None)))
+            inf.add_widget(details)
             r.add_widget(inf)
-            acts.add_widget(Button(text="Edytuj", on_press=lambda x, data=d: self.form_contact(*data)))
-            acts.add_widget(Button(text="Usuń", background_color=(0.8,0.2,0.2,1), on_press=lambda x, n=d[0], s=d[1]: self.delete_contact(n, s)))
-            r.add_widget(acts); self.c_ls.add_widget(r)
+
+            acts = BoxLayout(size_hint_x=0.34, orientation="vertical", spacing=dp(6))
+            acts.add_widget(ModernButton(text="Edytuj", on_press=lambda x, data=d: self.form_contact(*data)))
+            acts.add_widget(ModernButton(text="Usuń", bg_color=(0.75, 0.23, 0.23, 1), on_press=lambda x, n=d[0], s=d[1]: self.delete_contact(n, s)))
+            r.add_widget(acts)
+            self.c_ls.add_widget(r)
 
     def msg(self, tit, txt):
         safe_title = str(tit) if tit is not None else "Informacja"
         safe_text = str(txt) if txt is not None else ""
-        b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
-        lbl = Label(text=safe_text, halign="left", valign="middle")
+        b = BoxLayout(orientation="vertical", padding=dp(18), spacing=dp(10))
+        with b.canvas.before:
+            Color(*COLOR_CARD)
+            b.bg_rect = RoundedRectangle(pos=b.pos, size=b.size, radius=[dp(14)])
+        b.bind(pos=lambda inst, val: setattr(inst.bg_rect, 'pos', val), size=lambda inst, val: setattr(inst.bg_rect, 'size', val))
+
+        lbl = Label(text=safe_text, halign="left", valign="middle", color=(0.88, 0.9, 0.96, 1))
         lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(10), None)))
         b.add_widget(lbl)
         close_btn = ModernButton(text="OK", height=dp(50), size_hint_y=None)
         b.add_widget(close_btn)
-        p = Popup(title=safe_title, content=b, size_hint=(0.85, 0.45))
+        p = self.styled_popup(safe_title, b, size_hint=(0.85, 0.45))
         close_btn.bind(on_press=lambda *_: p.dismiss())
         p.open()
 
@@ -1719,41 +1881,48 @@ class FutureApp(App):
             if self.log_file.exists():
                 with open(self.log_file, "r", encoding="utf-8") as f:
                     text = f.read()[-40000:]
-            else: text = "\\n".join(self._log_buffer)
-            b = BoxLayout(orientation="vertical", padding=dp(10)); ti = TextInput(text=text, readonly=True, font_size='11sp'); b.add_widget(ti)
-            b.add_widget(Button(text="ZAMKNIJ", size_hint_y=0.2, on_press=lambda x: p.dismiss())); p = Popup(title="Logi aplikacji", content=b, size_hint=(.95,.95)); p.open()
-        except: self.msg("Błąd", "Nie można otworzyć logów")
+            else:
+                text = "\n".join(self._log_buffer)
+
+            b = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
+            ti = ModernInput(text=text, readonly=True, font_size='11sp')
+            b.add_widget(ti)
+            p = self.styled_popup("Logi aplikacji", b, size_hint=(.95, .95))
+            b.add_widget(ModernButton(text="Zamknij", size_hint_y=None, height=dp(48), on_press=lambda x: p.dismiss()))
+            p.open()
+        except:
+            self.msg("Błąd", "Nie można otworzyć logów")
 
     def setup_cars_ui(self):
-        b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
-        b.add_widget(Label(text="Moduł Samochody", bold=True))
-        b.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home')))
-        self.sc_ref["cars"].add_widget(b)
+        self.sc_ref["cars"].clear_widgets()
+        shell, content = self.build_screen_shell("Moduł Samochody", "Panel jest gotowy do dalszej rozbudowy")
+        content.add_widget(Label(text="Sekcja została ujednolicona wizualnie i przygotowana do dalszej rozbudowy.", color=(0.82, 0.87, 0.95, 1)))
+        self.sc_ref["cars"].add_widget(shell)
 
     def setup_paski_ui(self):
-        l = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
-        l.add_widget(Label(text="Moduł Paski", bold=True))
-        l.add_widget(ModernButton(text="Wczytaj arkusz płac", on_press=lambda x: self.open_picker("data"), height=dp(50), size_hint_y=None))
-        l.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home'), height=dp(55), size_hint_y=None, bg_color=(0.3,0.3,0.3,1)))
-        self.sc_ref["paski"].add_widget(l)
+        self.sc_ref["paski"].clear_widgets()
+        shell, content = self.build_screen_shell("Moduł Paski", "Import i przetwarzanie arkuszy płacowych")
+        content.add_widget(ModernButton(text="Wczytaj arkusz płac", on_press=lambda x: self.open_picker("data"), height=dp(50), size_hint_y=None))
+        content.add_widget(Label(text="Po imporcie dane będą gotowe do dalszej obsługi.", color=(0.82, 0.87, 0.95, 1), size_hint_y=None, height=dp(30)))
+        self.sc_ref["paski"].add_widget(shell)
 
     def setup_pracownicy_ui(self):
-        b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
-        b.add_widget(Label(text="Moduł Pracownicy (Placeholder)", bold=True))
-        b.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home')))
-        self.sc_ref["pracownicy"].add_widget(b)
+        self.sc_ref["pracownicy"].clear_widgets()
+        shell, content = self.build_screen_shell("Moduł Pracownicy", "Przestrzeń przygotowana pod rozwój funkcji HR")
+        content.add_widget(Label(text="Sekcja została ujednolicona wizualnie i przygotowana do dalszej rozbudowy.", color=(0.82, 0.87, 0.95, 1)))
+        self.sc_ref["pracownicy"].add_widget(shell)
 
     def setup_zaklady_ui(self):
-        b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
-        b.add_widget(Label(text="Moduł Zakłady (Placeholder)", bold=True))
-        b.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home')))
-        self.sc_ref["zaklady"].add_widget(b)
+        self.sc_ref["zaklady"].clear_widgets()
+        shell, content = self.build_screen_shell("Moduł Zakłady", "Zarządzanie lokalizacjami i oddziałami")
+        content.add_widget(Label(text="Sekcja została ujednolicona wizualnie i przygotowana do dalszej rozbudowy.", color=(0.82, 0.87, 0.95, 1)))
+        self.sc_ref["zaklady"].add_widget(shell)
 
     def setup_settings_ui(self):
-        l = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
-        l.add_widget(Label(text="Ustawienia", bold=True))
-        l.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home'), height=dp(55), size_hint_y=None, bg_color=(0.3,0.3,0.3,1)))
-        self.sc_ref["settings"].add_widget(l)
+        self.sc_ref["settings"].clear_widgets()
+        shell, content = self.build_screen_shell("Ustawienia", "Konfiguracja aplikacji i preferencji")
+        content.add_widget(Label(text="Sekcja została ujednolicona wizualnie i przygotowana do dalszej rozbudowy.", color=(0.82, 0.87, 0.95, 1)))
+        self.sc_ref["settings"].add_widget(shell)
 
 if __name__ == "__main__":
     FutureApp().run()
