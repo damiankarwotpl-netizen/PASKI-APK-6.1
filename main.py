@@ -627,6 +627,10 @@ class FutureApp(App):
             self.clothes_init()
         except:
             pass
+        try:
+            self.sync_all_contact_links()
+        except Exception:
+            self.log(f"sync_all_contact_links error: {traceback.format_exc()}")
 
     def clothes_init(self):
         c=self.conn.cursor()
@@ -1387,6 +1391,12 @@ class FutureApp(App):
                     self.conn.execute("""
                     INSERT INTO clothes_sizes (name,surname,plant,shirt,hoodie,pants,jacket,shoes) VALUES (?,?,?,?,?,?,?,?)
                     """, (name_ti.text.strip(), surname_ti.text.strip(), plant_ti.text.strip(), shirt_ti.text.strip(), hoodie_ti.text.strip(), pants_ti.text.strip(), jacket_ti.text.strip(), shoes_ti.text.strip()))
+                self._sync_worker_to_contacts_and_sizes(
+                    name_ti.text.strip(),
+                    surname_ti.text.strip(),
+                    "",
+                    plant_ti.text.strip()
+                )
                 self.conn.commit()
                 self.msg("OK", "Zapisano rozmiary")
                 p.dismiss()
@@ -1768,10 +1778,15 @@ class FutureApp(App):
                 continue
             if sv_city and sv_city not in str(d[6]).lower():
                 continue
-            r = BoxLayout(size_hint_y=None, height=dp(155), padding=dp(10), spacing=dp(8))
-            with r.canvas.before: Color(*COLOR_CARD); Rectangle(pos=r.pos, size=r.size)
-            inf, acts = BoxLayout(orientation="vertical"), BoxLayout(size_hint_x=0.3, orientation="vertical", spacing=dp(4))
-            inf.add_widget(Label(text=f"{d[0]} {d[1]}".title(), bold=True, halign="left", text_size=(dp(250),None)))
+            r = BoxLayout(size_hint_y=None, height=dp(190), padding=dp(10), spacing=dp(8))
+            with r.canvas.before:
+                Color(*COLOR_CARD)
+                rect = Rectangle(pos=r.pos, size=r.size)
+            self._bind_rect(r, rect)
+            inf, acts = BoxLayout(orientation="vertical"), BoxLayout(size_hint_x=0.22, orientation="vertical", spacing=dp(4))
+            name_lbl = Label(text=f"{d[0]} {d[1]}".title(), bold=True, halign="left")
+            name_lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            inf.add_widget(name_lbl)
             info_text = (
                 f"E: {d[2]}\n"
                 f"PESEL: {d[3] if d[3] else '-'}\n"
@@ -1780,7 +1795,9 @@ class FutureApp(App):
                 f"Adres: {d[6] if d[6] else '-'}\n"
                 f"Notatka: {d[7] if d[7] else '-'}"
             )
-            inf.add_widget(Label(text=info_text, font_size='11sp', halign="left", text_size=(dp(250),None), color=(0.7,0.7,0.7,1)))
+            info_lbl = Label(text=info_text, font_size='11sp', halign="left", valign='top', color=(0.7,0.7,0.7,1))
+            info_lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            inf.add_widget(info_lbl)
             r.add_widget(inf)
             qbox = self.contact_quick_actions(d[4], d[0], d[1])
             r.add_widget(qbox)
@@ -1859,12 +1876,82 @@ class FutureApp(App):
             pass
         wb.save(p/f"Raport_{nx}_{sx}.xlsx"); self.msg("OK", f"Zapisano PDF dla: {nx}"); self.log(f"Export single row for {nx} {sx}")
 
+    def sync_all_contact_links(self):
+        rows = self.conn.execute("SELECT name, surname, phone, workplace FROM contacts").fetchall()
+        for n, s, ph, wp in rows:
+            self._sync_contact_to_workers_and_sizes(n, s, ph, wp)
+        self.conn.commit()
+
+    def _sync_contact_to_workers_and_sizes(self, name, surname, phone="", workplace=""):
+        n = str(name).strip()
+        s = str(surname).strip()
+        if not n or not s:
+            return
+        self.ensure_extended_tables()
+        row = self.conn.execute(
+            "SELECT id FROM workers WHERE lower(name)=lower(?) AND lower(surname)=lower(?) LIMIT 1",
+            (n, s)
+        ).fetchone()
+        if row:
+            self.conn.execute(
+                "UPDATE workers SET plant=?, phone=? WHERE id=?",
+                (str(workplace).strip(), str(phone).strip(), row[0])
+            )
+        else:
+            self.conn.execute(
+                "INSERT INTO workers(name, surname, plant, phone, position, hire_date) VALUES(?,?,?,?,?,?)",
+                (n, s, str(workplace).strip(), str(phone).strip(), "", "")
+            )
+
+        sz = self.conn.execute(
+            "SELECT id FROM clothes_sizes WHERE lower(name)=lower(?) AND lower(surname)=lower(?) LIMIT 1",
+            (n, s)
+        ).fetchone()
+        if sz:
+            self.conn.execute(
+                "UPDATE clothes_sizes SET plant=COALESCE(NULLIF(?, ''), plant) WHERE id=?",
+                (str(workplace).strip(), sz[0])
+            )
+        else:
+            self.conn.execute(
+                "INSERT INTO clothes_sizes(name, surname, plant, shirt, hoodie, pants, jacket, shoes) VALUES(?,?,?,?,?,?,?,?)",
+                (n, s, str(workplace).strip(), "", "", "", "", "")
+            )
+
+    def _sync_worker_to_contacts_and_sizes(self, name, surname, phone="", plant=""):
+        n = str(name).strip()
+        s = str(surname).strip()
+        if not n or not s:
+            return
+        existing = self.conn.execute(
+            "SELECT email, pesel, apartment, notes FROM contacts WHERE lower(name)=lower(?) AND lower(surname)=lower(?) LIMIT 1",
+            (n, s)
+        ).fetchone()
+        if existing:
+            self.conn.execute(
+                "UPDATE contacts SET phone=?, workplace=? WHERE lower(name)=lower(?) AND lower(surname)=lower(?)",
+                (str(phone).strip(), str(plant).strip(), n, s)
+            )
+        else:
+            self.conn.execute(
+                "INSERT INTO contacts(name, surname, email, pesel, phone, workplace, apartment, notes) VALUES(?,?,?,?,?,?,?,?)",
+                (n.lower(), s.lower(), "", "", str(phone).strip(), str(plant).strip(), "", "")
+            )
+        self._sync_contact_to_workers_and_sizes(n, s, phone, plant)
+
+    def _bind_rect(self, widget, rect):
+        widget.bind(pos=lambda inst, val, r=rect: setattr(r, 'pos', val))
+        widget.bind(size=lambda inst, val, r=rect: setattr(r, 'size', val))
+
     def delete_contact(self, n, s):
         def pr(_):
             self.conn.execute("DELETE FROM contacts WHERE name=? AND surname=?", (n, s))
+            self.conn.execute("DELETE FROM workers WHERE lower(name)=lower(?) AND lower(surname)=lower(?)", (n, s))
+            self.conn.execute("DELETE FROM clothes_sizes WHERE lower(name)=lower(?) AND lower(surname)=lower(?)", (n, s))
             self.conn.commit()
             px.dismiss()
             self.refresh_contacts_list()
+            self.refresh_workers_module()
             self.update_stats()
         px = Popup(title="Usuń?", content=BoxLayout(orientation="vertical", children=[ModernButton(text="USUŃ KONTAKT", on_press=pr, size_hint_y=None, height=dp(50))]), size_hint=(0.7,0.3)); px.open()
 
@@ -1887,9 +1974,16 @@ class FutureApp(App):
                  workplace_ti.text.strip(),
                  apartment_ti.text.strip(),
                  notes_ti.text.strip()))
+            self._sync_contact_to_workers_and_sizes(
+                f_ins[0].text.strip(),
+                f_ins[1].text.strip(),
+                f_ins[4].text.strip(),
+                workplace_ti.text.strip()
+            )
             self.conn.commit()
             px.dismiss()
             self.refresh_contacts_list()
+            self.refresh_workers_module()
             self.update_stats()
         b.add_widget(ModernButton(text="ZAPISZ", on_press=save)); px = Popup(title="Kontakt", content=b, size_hint=(0.9, 0.85)); px.open()
 
@@ -1931,7 +2025,7 @@ class FutureApp(App):
             self.msg("Błąd", "Nie udało się otworzyć WhatsApp")
 
     def contact_quick_actions(self, phone, name, surname):
-        box = BoxLayout(size_hint_x=0.34, orientation='vertical', spacing=dp(4))
+        box = BoxLayout(size_hint_x=0.24, orientation='vertical', spacing=dp(4))
         phone_txt = str(phone).strip() if phone else ""
 
         def copy_phone(_):
@@ -1976,14 +2070,21 @@ class FutureApp(App):
             text_blob = " ".join(str(x or "") for x in row).lower()
             if search and search not in text_blob:
                 continue
-            card = BoxLayout(size_hint_y=None, height=dp(120), padding=dp(8), spacing=dp(8))
+            card = BoxLayout(size_hint_y=None, height=dp(145), padding=dp(8), spacing=dp(8))
             with card.canvas.before:
                 Color(*COLOR_CARD)
-                Rectangle(pos=card.pos, size=card.size)
+                rect = Rectangle(pos=card.pos, size=card.size)
+            self._bind_rect(card, rect)
             info = BoxLayout(orientation='vertical')
-            info.add_widget(Label(text=f"{row[2] or '-'} {row[3] or '-'} | {row[1]}", bold=True, halign='left', text_size=(dp(320), None)))
-            info.add_widget(Label(text=f"Zakład: {row[4] or '-'} | Kierowca: {row[7] or '-'}", font_size='11sp', halign='left', text_size=(dp(320), None)))
-            info.add_widget(Label(text=f"Przebieg: {row[5] or 0} km | Status: {row[6] or '-'}", font_size='11sp', halign='left', text_size=(dp(320), None), color=(0.78,0.81,0.87,1)))
+            h = Label(text=f"{row[2] or '-'} {row[3] or '-'} | {row[1]}", bold=True, halign='left')
+            h.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            i1 = Label(text=f"Zakład: {row[4] or '-'} | Kierowca: {row[7] or '-'}", font_size='11sp', halign='left')
+            i1.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            i2 = Label(text=f"Przebieg: {row[5] or 0} km | Status: {row[6] or '-'}", font_size='11sp', halign='left', color=(0.78,0.81,0.87,1))
+            i2.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            info.add_widget(h)
+            info.add_widget(i1)
+            info.add_widget(i2)
             actions = BoxLayout(size_hint_x=0.32, orientation='vertical', spacing=dp(4))
             actions.add_widget(ModernButton(text='Edytuj', on_press=lambda x, data=row: self.form_car(*data)))
             actions.add_widget(ModernButton(text='Usuń', bg_color=(0.7,0.15,0.15,1), on_press=lambda x, cid=row[0]: self.delete_car(cid)))
@@ -2049,14 +2150,21 @@ class FutureApp(App):
         for row in rows:
             if search and search not in " ".join(str(x or '') for x in row).lower():
                 continue
-            card = BoxLayout(size_hint_y=None, height=dp(120), padding=dp(8), spacing=dp(8))
+            card = BoxLayout(size_hint_y=None, height=dp(145), padding=dp(8), spacing=dp(8))
             with card.canvas.before:
                 Color(*COLOR_CARD)
-                Rectangle(pos=card.pos, size=card.size)
+                rect = Rectangle(pos=card.pos, size=card.size)
+            self._bind_rect(card, rect)
             info = BoxLayout(orientation='vertical')
-            info.add_widget(Label(text=f"{row[1]} {row[2]}", bold=True, halign='left', text_size=(dp(320), None)))
-            info.add_widget(Label(text=f"Stanowisko: {row[5] or '-'} | Zakład: {row[3] or '-'}", font_size='11sp', halign='left', text_size=(dp(320), None)))
-            info.add_widget(Label(text=f"Telefon: {row[4] or '-'} | Zatrudniony: {row[6] or '-'}", font_size='11sp', halign='left', text_size=(dp(320), None), color=(0.78,0.81,0.87,1)))
+            h = Label(text=f"{row[1]} {row[2]}", bold=True, halign='left')
+            h.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            i1 = Label(text=f"Stanowisko: {row[5] or '-'} | Zakład: {row[3] or '-'}", font_size='11sp', halign='left')
+            i1.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            i2 = Label(text=f"Telefon: {row[4] or '-'} | Zatrudniony: {row[6] or '-'}", font_size='11sp', halign='left', color=(0.78,0.81,0.87,1))
+            i2.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            info.add_widget(h)
+            info.add_widget(i1)
+            info.add_widget(i2)
             act = BoxLayout(size_hint_x=0.32, orientation='vertical', spacing=dp(4))
             act.add_widget(ModernButton(text='Edytuj', on_press=lambda x, data=row: self.form_worker(*data)))
             act.add_widget(ModernButton(text='Usuń', bg_color=(0.7,0.15,0.15,1), on_press=lambda x, wid=row[0]: self.delete_worker(wid)))
@@ -2086,6 +2194,12 @@ class FutureApp(App):
             else:
                 self.conn.execute('INSERT INTO workers(name, surname, plant, phone, position, hire_date) VALUES(?,?,?,?,?,?)',
                     (fields['name'].text.strip(), fields['surname'].text.strip(), fields['plant'].text.strip(), fields['phone'].text.strip(), fields['position'].text.strip(), fields['hire_date'].text.strip()))
+            self._sync_worker_to_contacts_and_sizes(
+                fields['name'].text.strip(),
+                fields['surname'].text.strip(),
+                fields['phone'].text.strip(),
+                fields['plant'].text.strip()
+            )
             self.conn.commit()
             px.dismiss()
             self.refresh_workers_module()
@@ -2112,14 +2226,21 @@ class FutureApp(App):
         for row in rows:
             if search and search not in " ".join(str(x or '') for x in row).lower():
                 continue
-            card = BoxLayout(size_hint_y=None, height=dp(130), padding=dp(8), spacing=dp(8))
+            card = BoxLayout(size_hint_y=None, height=dp(145), padding=dp(8), spacing=dp(8))
             with card.canvas.before:
                 Color(*COLOR_CARD)
-                Rectangle(pos=card.pos, size=card.size)
+                rect = Rectangle(pos=card.pos, size=card.size)
+            self._bind_rect(card, rect)
             info = BoxLayout(orientation='vertical')
-            info.add_widget(Label(text=f"{row[1] or '-'} ({row[2] or '-'})", bold=True, halign='left', text_size=(dp(320), None)))
-            info.add_widget(Label(text=f"Adres: {row[3] or '-'}", font_size='11sp', halign='left', text_size=(dp(320), None)))
-            info.add_widget(Label(text=f"Tel: {row[4] or '-'} | Notatki: {row[5] or '-'}", font_size='11sp', halign='left', text_size=(dp(320), None), color=(0.78,0.81,0.87,1)))
+            h = Label(text=f"{row[1] or '-'} ({row[2] or '-'})", bold=True, halign='left')
+            h.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            i1 = Label(text=f"Adres: {row[3] or '-'}", font_size='11sp', halign='left')
+            i1.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            i2 = Label(text=f"Tel: {row[4] or '-'} | Notatki: {row[5] or '-'}", font_size='11sp', halign='left', color=(0.78,0.81,0.87,1))
+            i2.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            info.add_widget(h)
+            info.add_widget(i1)
+            info.add_widget(i2)
             act = BoxLayout(size_hint_x=0.32, orientation='vertical', spacing=dp(4))
             act.add_widget(ModernButton(text='Edytuj', on_press=lambda x, data=row: self.form_plant(*data)))
             act.add_widget(ModernButton(text='Usuń', bg_color=(0.7,0.15,0.15,1), on_press=lambda x, pid=row[0]: self.delete_plant(pid)))
