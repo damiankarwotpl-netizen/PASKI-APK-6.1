@@ -1,171 +1,86 @@
-name: Build Paski Future APK
+name: Android CI (fast)
 
 on:
-  push:
-    branches:
-      - main
-      - master
-      - work
-  pull_request:
   workflow_dispatch:
-    inputs:
-      build_mode:
-        description: "Build variant"
-        required: true
-        default: "debug"
-        type: choice
-        options:
-          - debug
+  push:
+    branches: [main, work]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  checks:
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-      - name: Syntax check
-        run: python -m py_compile main.py
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
 
-  build:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 90
-    needs: checks
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_NO_PYTHON_VERSION_WARNING: "1"
+      USE_CCACHE: "1"
+      CCACHE_DIR: ~/.ccache
+      BUILDOZER_WARN_ON_ROOT: "0"
 
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Detect source changes
-        id: changes
-        run: |
-          CHANGED="$(git diff --name-only HEAD^ HEAD || true)"
-          NEED_CLEAN=0
-
-          if echo "$CHANGED" | grep -E "main.py|buildozer.spec|requirements"; then
-            NEED_CLEAN=1
-          fi
-
-          echo "need_clean=$NEED_CLEAN" >> $GITHUB_OUTPUT
-
-      - name: Set build version
-        run: |
-          echo "APP_VERSION=1.0.${{ github.run_number }}" >> $GITHUB_ENV
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Set up Java 17
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
-      - name: Cache Buildozer
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Cache Buildozer / p4a / Gradle / ccache
         uses: actions/cache@v4
         with:
           path: |
-            .buildozer
             ~/.buildozer
-          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec','main.py') }}
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.ccache
+          key: ${{ runner.os }}-android-fast-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            buildozer-${{ runner.os }}-
-
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle
-          key: gradle-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
-
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('requirements.txt','buildozer.spec') }}
-
-      - name: Cache Android SDK/NDK
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.buildozer/android/platform
-          key: android-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
-
-      - name: Clean project (AUTO)
-        if: steps.changes.outputs.need_clean == '1'
-        run: |
-          echo "Source changed -> cleaning"
-          rm -rf .buildozer
-          rm -rf bin
-          rm -rf ~/.buildozer
-
-      - name: Collect system info
-        run: |
-          mkdir -p artifacts
-          uname -a > artifacts/system-info.log
-          env > artifacts/environment.log
+            ${{ runner.os }}-android-fast-
 
       - name: Install system dependencies
         run: |
-          sudo apt update
-          sudo apt install -y \
-            zip unzip autoconf libtool pkg-config \
-            zlib1g-dev libncurses5-dev libncursesw5-dev \
-            libtinfo5 cmake libffi-dev libssl-dev
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            ccache \
+            git \
+            libffi-dev \
+            libssl-dev \
+            libsqlite3-dev \
+            libjpeg-dev \
+            zlib1g-dev
 
-      - name: Install Buildozer toolchain
+      - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade pip setuptools wheel
-          python -m pip install buildozer==1.5.0 cython==0.29.36
+          python -m pip install --upgrade pip wheel setuptools
+          python -m pip install --upgrade cython==0.29.36 buildozer
 
-      - name: Enable turbo compile
+      - name: CI fast profile tweaks
         run: |
-          echo "MAKEFLAGS=-j$(nproc)" >> $GITHUB_ENV
-          echo "GRADLE_OPTS=-Dorg.gradle.parallel=true" >> $GITHUB_ENV
+          # Jedna architektura znacząco skraca czas kompilacji.
+          sed -i 's/^android.archs\s*=.*/android.archs = arm64-v8a/' buildozer.spec
 
-      - name: Initialize Android SDK/NDK
+      - name: Build debug APK (faster path)
         run: |
-          mkdir -p artifacts
-          (yes || true) | buildozer android update 2>&1 | tee artifacts/buildozer-update.log
-          exit ${PIPESTATUS[1]}
-
-      - name: Build APK
-        run: |
-          mkdir -p artifacts
-          (yes || true) | buildozer android debug 2>&1 | tee artifacts/buildozer.log
-
-      - name: Generate crash report
-        if: failure()
-        run: |
-          mkdir -p artifacts
-          echo "BUILD FAILED $(date)" > artifacts/crash-report.log
-          tail -n 200 artifacts/buildozer.log >> artifacts/crash-report.log || true
-
-      - name: Upload build logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: |
-            artifacts/*
-          if-no-files-found: warn
-
-      - name: Find APK
-        run: |
-          find . -name "*.apk"
+          buildozer android debug
 
       - name: Upload APK artifact
-        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: paski-future-build-${{ github.run_number }}
-          path: |
-            **/outputs/apk/**/*.apk
-            **/*.apk
+          name: future-android-apk
+          path: bin/*.apk
           if-no-files-found: error

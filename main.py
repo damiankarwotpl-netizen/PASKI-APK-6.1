@@ -988,14 +988,8 @@ class FutureApp(App):
         self.clothes_sm.current = 'sizes'
         container.add_widget(self.clothes_sm)
         self.sc_ref["clothes"].add_widget(container)
-        try:
-            scr = self.clothes_sm.get_screen('sizes')
-            if hasattr(scr, 'build_ui'):
-                scr.build_ui()
-            if hasattr(scr, 'refresh'):
-                scr.refresh()
-        except:
-            pass
+        # Lazy init: cięższe budowanie widoku rozmiarów wykonujemy dopiero przy wejściu
+        # na ekran "clothes" (obsługuje to _on_main_clothes_enter).
 
     # ==========================================
     # MODYFIKACJA: NOWE ZAMÓWIENIE (KROK 1: WYBÓR)
@@ -1487,6 +1481,11 @@ class FutureApp(App):
         for t, c in btns: l.add_widget(ModernButton(text=t, on_press=c, height=dp(50), size_hint_y=None))
         l.add_widget(ModernButton(text="PAUZA/RESUME WYSYŁKI", on_press=self.toggle_pause_mailing, height=dp(50), size_hint_y=None, bg_color=(0.6,0.6,0.1,1)))
         l.add_widget(ModernButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'home'), bg_color=(0.3,0.3,0.3,1))); self.sc_ref["email"].add_widget(l); self.update_stats()
+
+    def clear_all_attachments(self, _=None):
+        self.global_attachments.clear()
+        self.update_stats()
+        self.msg("OK", "Usunięto wszystkie załączniki")
 
     def on_auto_checkbox_changed(self, instance, value):
         self.auto_send_mode = bool(value)
