@@ -7,6 +7,8 @@ import mimetypes
 import time
 import random
 import traceback
+import webbrowser
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 from email.message import EmailMessage
@@ -423,6 +425,29 @@ class FutureApp(App):
         self.conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, val TEXT)")
         self.conn.execute("CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, ok INTEGER, fail INTEGER, skip INTEGER, auto INTEGER, details TEXT)")
         self.conn.execute("""
+        CREATE TABLE IF NOT EXISTS plants(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE,
+        city TEXT,
+        address TEXT,
+        contact_phone TEXT,
+        notes TEXT
+        )
+        """)
+        self.conn.execute("""
+        CREATE TABLE IF NOT EXISTS fleet_cars(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        plate TEXT UNIQUE,
+        brand TEXT,
+        model TEXT,
+        plant TEXT,
+        mileage INTEGER DEFAULT 0,
+        status TEXT,
+        driver TEXT,
+        notes TEXT
+        )
+        """)
+        self.conn.execute("""
         CREATE TABLE IF NOT EXISTS clothes_sizes(
         id INTEGER PRIMARY KEY,
         name TEXT,
@@ -511,6 +536,9 @@ class FutureApp(App):
         self._add_column_if_missing('clothes_order_items', 'item', 'TEXT')
         self._add_column_if_missing('clothes_order_items', 'qty', 'INTEGER')
         self._add_column_if_missing('clothes_order_items', 'issued', 'INTEGER')
+        self._add_column_if_missing('workers', 'phone', 'TEXT')
+        self._add_column_if_missing('workers', 'position', 'TEXT')
+        self._add_column_if_missing('workers', 'hire_date', 'TEXT')
 
     def clothes_import_excel(self,path):
         if pd is None:
@@ -1739,13 +1767,266 @@ class FutureApp(App):
     def clear_all_attachments(self, _):
         [self.global_attachments.clear(), self.update_stats(), self.log("Cleared attachments")]
 
+    def refresh_cars_list(self, *args):
+        if not hasattr(self, 'cars_grid'):
+            return
+        self.cars_grid.clear_widgets()
+        search = self.ti_cars_search.text.lower() if hasattr(self, 'ti_cars_search') else ""
+        rows = self.conn.execute("SELECT id, plate, brand, model, plant, mileage, status, driver FROM fleet_cars ORDER BY plate").fetchall()
+        for row in rows:
+            text_blob = " ".join(str(x or "") for x in row).lower()
+            if search and search not in text_blob:
+                continue
+            card = BoxLayout(size_hint_y=None, height=dp(120), padding=dp(8), spacing=dp(8))
+            with card.canvas.before:
+                Color(*COLOR_CARD)
+                Rectangle(pos=card.pos, size=card.size)
+            info = BoxLayout(orientation='vertical')
+            info.add_widget(Label(text=f"{row[2] or '-'} {row[3] or '-'} | {row[1]}", bold=True, halign='left', text_size=(dp(320), None)))
+            info.add_widget(Label(text=f"Zakład: {row[4] or '-'} | Kierowca: {row[7] or '-'}", font_size='11sp', halign='left', text_size=(dp(320), None)))
+            info.add_widget(Label(text=f"Przebieg: {row[5] or 0} km | Status: {row[6] or '-'}", font_size='11sp', halign='left', text_size=(dp(320), None), color=(0.78,0.81,0.87,1)))
+            actions = BoxLayout(size_hint_x=0.32, orientation='vertical', spacing=dp(4))
+            actions.add_widget(ModernButton(text='Edytuj', on_press=lambda x, data=row: self.form_car(*data)))
+            actions.add_widget(ModernButton(text='Usuń', bg_color=(0.7,0.15,0.15,1), on_press=lambda x, cid=row[0]: self.delete_car(cid)))
+            card.add_widget(info)
+            card.add_widget(actions)
+            self.cars_grid.add_widget(card)
+
+    def form_car(self, cid=None, plate='', brand='', model='', plant='', mileage=0, status='Aktywny', driver='', notes=''):
+        b = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
+        fields = {
+            'plate': TextInput(text=str(plate or ''), hint_text='Rejestracja'),
+            'brand': TextInput(text=str(brand or ''), hint_text='Marka'),
+            'model': TextInput(text=str(model or ''), hint_text='Model'),
+            'plant': TextInput(text=str(plant or ''), hint_text='Zakład'),
+            'mileage': TextInput(text=str(mileage or 0), hint_text='Przebieg'),
+            'status': TextInput(text=str(status or ''), hint_text='Status'),
+            'driver': TextInput(text=str(driver or ''), hint_text='Kierowca'),
+            'notes': TextInput(text=str(notes or ''), hint_text='Notatki', multiline=True, size_hint_y=None, height=dp(70)),
+        }
+        for key in ['plate', 'brand', 'model', 'plant', 'mileage', 'status', 'driver', 'notes']:
+            b.add_widget(fields[key])
+
+        def save(_):
+            if not fields['plate'].text.strip():
+                return self.msg('Błąd', 'Pole rejestracja jest wymagane')
+            try:
+                mil = int(fields['mileage'].text.strip() or '0')
+            except Exception:
+                mil = 0
+            if cid:
+                self.conn.execute(
+                    "UPDATE fleet_cars SET plate=?, brand=?, model=?, plant=?, mileage=?, status=?, driver=?, notes=? WHERE id=?",
+                    (fields['plate'].text.strip().upper(), fields['brand'].text.strip(), fields['model'].text.strip(), fields['plant'].text.strip(), mil, fields['status'].text.strip(), fields['driver'].text.strip(), fields['notes'].text.strip(), cid)
+                )
+            else:
+                self.conn.execute(
+                    "INSERT INTO fleet_cars(plate, brand, model, plant, mileage, status, driver, notes) VALUES(?,?,?,?,?,?,?,?)",
+                    (fields['plate'].text.strip().upper(), fields['brand'].text.strip(), fields['model'].text.strip(), fields['plant'].text.strip(), mil, fields['status'].text.strip(), fields['driver'].text.strip(), fields['notes'].text.strip())
+                )
+            self.conn.commit()
+            px.dismiss()
+            self.refresh_cars_list()
+
+        b.add_widget(ModernButton(text='Zapisz', on_press=save))
+        px = Popup(title='Samochód', content=b, size_hint=(0.9, 0.9))
+        px.open()
+
+    def delete_car(self, cid):
+        self.conn.execute('DELETE FROM fleet_cars WHERE id=?', (cid,))
+        self.conn.commit()
+        self.refresh_cars_list()
+
+    def refresh_workers_module(self, *args):
+        if not hasattr(self, 'workers_grid'):
+            return
+        self.workers_grid.clear_widgets()
+        search = self.ti_workers_search.text.lower() if hasattr(self, 'ti_workers_search') else ''
+        rows = self.conn.execute('SELECT id, name, surname, plant, phone, position, hire_date FROM workers ORDER BY surname').fetchall()
+        for row in rows:
+            if search and search not in " ".join(str(x or '') for x in row).lower():
+                continue
+            card = BoxLayout(size_hint_y=None, height=dp(120), padding=dp(8), spacing=dp(8))
+            with card.canvas.before:
+                Color(*COLOR_CARD)
+                Rectangle(pos=card.pos, size=card.size)
+            info = BoxLayout(orientation='vertical')
+            info.add_widget(Label(text=f"{row[1]} {row[2]}", bold=True, halign='left', text_size=(dp(320), None)))
+            info.add_widget(Label(text=f"Stanowisko: {row[5] or '-'} | Zakład: {row[3] or '-'}", font_size='11sp', halign='left', text_size=(dp(320), None)))
+            info.add_widget(Label(text=f"Telefon: {row[4] or '-'} | Zatrudniony: {row[6] or '-'}", font_size='11sp', halign='left', text_size=(dp(320), None), color=(0.78,0.81,0.87,1)))
+            act = BoxLayout(size_hint_x=0.32, orientation='vertical', spacing=dp(4))
+            act.add_widget(ModernButton(text='Edytuj', on_press=lambda x, data=row: self.form_worker(*data)))
+            act.add_widget(ModernButton(text='Usuń', bg_color=(0.7,0.15,0.15,1), on_press=lambda x, wid=row[0]: self.delete_worker(wid)))
+            card.add_widget(info)
+            card.add_widget(act)
+            self.workers_grid.add_widget(card)
+
+    def form_worker(self, wid=None, name='', surname='', plant='', phone='', position='', hire_date=''):
+        b = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
+        fields = {
+            'name': TextInput(text=str(name or ''), hint_text='Imię'),
+            'surname': TextInput(text=str(surname or ''), hint_text='Nazwisko'),
+            'plant': TextInput(text=str(plant or ''), hint_text='Zakład'),
+            'phone': TextInput(text=str(phone or ''), hint_text='Telefon'),
+            'position': TextInput(text=str(position or ''), hint_text='Stanowisko'),
+            'hire_date': TextInput(text=str(hire_date or ''), hint_text='Data zatrudnienia (YYYY-MM-DD)'),
+        }
+        for key in ['name', 'surname', 'plant', 'phone', 'position', 'hire_date']:
+            b.add_widget(fields[key])
+
+        def save(_):
+            if not fields['name'].text.strip() or not fields['surname'].text.strip():
+                return self.msg('Błąd', 'Imię i nazwisko są wymagane')
+            if wid:
+                self.conn.execute('UPDATE workers SET name=?, surname=?, plant=?, phone=?, position=?, hire_date=? WHERE id=?',
+                    (fields['name'].text.strip(), fields['surname'].text.strip(), fields['plant'].text.strip(), fields['phone'].text.strip(), fields['position'].text.strip(), fields['hire_date'].text.strip(), wid))
+            else:
+                self.conn.execute('INSERT INTO workers(name, surname, plant, phone, position, hire_date) VALUES(?,?,?,?,?,?)',
+                    (fields['name'].text.strip(), fields['surname'].text.strip(), fields['plant'].text.strip(), fields['phone'].text.strip(), fields['position'].text.strip(), fields['hire_date'].text.strip()))
+            self.conn.commit()
+            px.dismiss()
+            self.refresh_workers_module()
+
+        b.add_widget(ModernButton(text='Zapisz', on_press=save))
+        px = Popup(title='Pracownik', content=b, size_hint=(0.9, 0.85))
+        px.open()
+
+    def delete_worker(self, wid):
+        self.conn.execute('DELETE FROM workers WHERE id=?', (wid,))
+        self.conn.commit()
+        self.refresh_workers_module()
+
+    def refresh_plants_list(self, *args):
+        if not hasattr(self, 'plants_grid'):
+            return
+        self.plants_grid.clear_widgets()
+        search = self.ti_plants_search.text.lower() if hasattr(self, 'ti_plants_search') else ''
+        rows = self.conn.execute('SELECT id, name, city, address, contact_phone, notes FROM plants ORDER BY name').fetchall()
+        for row in rows:
+            if search and search not in " ".join(str(x or '') for x in row).lower():
+                continue
+            card = BoxLayout(size_hint_y=None, height=dp(130), padding=dp(8), spacing=dp(8))
+            with card.canvas.before:
+                Color(*COLOR_CARD)
+                Rectangle(pos=card.pos, size=card.size)
+            info = BoxLayout(orientation='vertical')
+            info.add_widget(Label(text=f"{row[1] or '-'} ({row[2] or '-'})", bold=True, halign='left', text_size=(dp(320), None)))
+            info.add_widget(Label(text=f"Adres: {row[3] or '-'}", font_size='11sp', halign='left', text_size=(dp(320), None)))
+            info.add_widget(Label(text=f"Tel: {row[4] or '-'} | Notatki: {row[5] or '-'}", font_size='11sp', halign='left', text_size=(dp(320), None), color=(0.78,0.81,0.87,1)))
+            act = BoxLayout(size_hint_x=0.32, orientation='vertical', spacing=dp(4))
+            act.add_widget(ModernButton(text='Edytuj', on_press=lambda x, data=row: self.form_plant(*data)))
+            act.add_widget(ModernButton(text='Usuń', bg_color=(0.7,0.15,0.15,1), on_press=lambda x, pid=row[0]: self.delete_plant(pid)))
+            card.add_widget(info)
+            card.add_widget(act)
+            self.plants_grid.add_widget(card)
+
+    def form_plant(self, pid=None, name='', city='', address='', contact_phone='', notes=''):
+        b = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
+        fields = {
+            'name': TextInput(text=str(name or ''), hint_text='Nazwa zakładu'),
+            'city': TextInput(text=str(city or ''), hint_text='Miasto'),
+            'address': TextInput(text=str(address or ''), hint_text='Adres'),
+            'contact_phone': TextInput(text=str(contact_phone or ''), hint_text='Telefon'),
+            'notes': TextInput(text=str(notes or ''), hint_text='Notatki', multiline=True, size_hint_y=None, height=dp(70)),
+        }
+        for key in ['name', 'city', 'address', 'contact_phone', 'notes']:
+            b.add_widget(fields[key])
+
+        def save(_):
+            if not fields['name'].text.strip():
+                return self.msg('Błąd', 'Nazwa zakładu jest wymagana')
+            if pid:
+                self.conn.execute('UPDATE plants SET name=?, city=?, address=?, contact_phone=?, notes=? WHERE id=?',
+                    (fields['name'].text.strip(), fields['city'].text.strip(), fields['address'].text.strip(), fields['contact_phone'].text.strip(), fields['notes'].text.strip(), pid))
+            else:
+                self.conn.execute('INSERT INTO plants(name, city, address, contact_phone, notes) VALUES(?,?,?,?,?)',
+                    (fields['name'].text.strip(), fields['city'].text.strip(), fields['address'].text.strip(), fields['contact_phone'].text.strip(), fields['notes'].text.strip()))
+            self.conn.commit()
+            px.dismiss()
+            self.refresh_plants_list()
+
+        b.add_widget(ModernButton(text='Zapisz', on_press=save))
+        px = Popup(title='Zakład', content=b, size_hint=(0.9, 0.85))
+        px.open()
+
+    def delete_plant(self, pid):
+        self.conn.execute('DELETE FROM plants WHERE id=?', (pid,))
+        self.conn.commit()
+        self.refresh_plants_list()
+
     def setup_cars_ui(self):
         self.sc_ref["cars"].clear_widgets()
-        b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
-        b.add_widget(Label(text="Moduł Samochody", bold=True, font_size="22sp", color=COLOR_PRIMARY))
-        b.add_widget(Label(text="Panel w przygotowaniu", color=(0.75,0.78,0.84,1)))
-        b.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home')))
-        self.sc_ref["cars"].add_widget(b)
+        root = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
+        top = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(6))
+        self.ti_cars_search = TextInput(hint_text='Szukaj samochodu (rej, marka, kierowca)')
+        self.ti_cars_search.bind(text=self.refresh_cars_list)
+        top.add_widget(self.ti_cars_search)
+        top.add_widget(ModernButton(text='Dodaj', size_hint_x=0.2, on_press=lambda x: self.form_car()))
+        top.add_widget(ModernButton(text='Powrót', size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home'), bg_color=(0.3,0.3,0.3,1)))
+        root.add_widget(top)
+        self.cars_grid = GridLayout(cols=1, spacing=dp(8), size_hint_y=None)
+        self.cars_grid.bind(minimum_height=self.cars_grid.setter('height'))
+        sc = ScrollView()
+        sc.add_widget(self.cars_grid)
+        root.add_widget(sc)
+        self.sc_ref['cars'].add_widget(root)
+        self.refresh_cars_list()
+
+    def setup_pracownicy_ui(self):
+        self.sc_ref["pracownicy"].clear_widgets()
+        root = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
+        top = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(6))
+        self.ti_workers_search = TextInput(hint_text='Szukaj pracownika (imię, nazwisko, zakład)')
+        self.ti_workers_search.bind(text=self.refresh_workers_module)
+        top.add_widget(self.ti_workers_search)
+        top.add_widget(ModernButton(text='Dodaj', size_hint_x=0.2, on_press=lambda x: self.form_worker()))
+        top.add_widget(ModernButton(text='Powrót', size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home'), bg_color=(0.3,0.3,0.3,1)))
+        root.add_widget(top)
+        self.workers_grid = GridLayout(cols=1, spacing=dp(8), size_hint_y=None)
+        self.workers_grid.bind(minimum_height=self.workers_grid.setter('height'))
+        sc = ScrollView()
+        sc.add_widget(self.workers_grid)
+        root.add_widget(sc)
+        self.sc_ref['pracownicy'].add_widget(root)
+        self.refresh_workers_module()
+
+    def setup_zaklady_ui(self):
+        self.sc_ref["zaklady"].clear_widgets()
+        root = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
+        top = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(6))
+        self.ti_plants_search = TextInput(hint_text='Szukaj zakładu (nazwa, miasto, telefon)')
+        self.ti_plants_search.bind(text=self.refresh_plants_list)
+        top.add_widget(self.ti_plants_search)
+        top.add_widget(ModernButton(text='Dodaj', size_hint_x=0.2, on_press=lambda x: self.form_plant()))
+        top.add_widget(ModernButton(text='Powrót', size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'home'), bg_color=(0.3,0.3,0.3,1)))
+        root.add_widget(top)
+        self.plants_grid = GridLayout(cols=1, spacing=dp(8), size_hint_y=None)
+        self.plants_grid.bind(minimum_height=self.plants_grid.setter('height'))
+        sc = ScrollView()
+        sc.add_widget(self.plants_grid)
+        root.add_widget(sc)
+        self.sc_ref['zaklady'].add_widget(root)
+        self.refresh_plants_list()
+
+    def setup_settings_ui(self):
+        self.sc_ref["settings"].clear_widgets()
+        l = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
+        l.add_widget(Label(text="Ustawienia i narzędzia", bold=True, font_size="24sp", color=COLOR_PRIMARY))
+        try:
+            contacts_count = self.conn.execute("SELECT COUNT(*) FROM contacts").fetchone()[0]
+            workers_count = self.conn.execute("SELECT COUNT(*) FROM workers").fetchone()[0]
+            cars_count = self.conn.execute("SELECT COUNT(*) FROM fleet_cars").fetchone()[0]
+            plants_count = self.conn.execute("SELECT COUNT(*) FROM plants").fetchone()[0]
+            l.add_widget(Label(text=f"Baza: kontakty {contacts_count} | pracownicy {workers_count} | auta {cars_count} | zakłady {plants_count}", size_hint_y=None, height=dp(30), color=(0.75,0.82,0.92,1)))
+        except Exception:
+            pass
+        l.add_widget(ModernButton(text="Dodaj bazę danych", on_press=lambda x: self.open_picker("book"), height=dp(50), size_hint_y=None))
+        l.add_widget(ModernButton(text="Ustawienia SMTP", on_press=lambda x: setattr(self.sm, 'current', 'smtp'), height=dp(50), size_hint_y=None))
+        l.add_widget(ModernButton(text="Edytuj szablon email", on_press=lambda x: setattr(self.sm, 'current', 'tmpl'), height=dp(50), size_hint_y=None))
+        l.add_widget(ModernButton(text="Wczytaj arkusz płac", on_press=lambda x: self.open_picker("data"), height=dp(50), size_hint_y=None))
+        l.add_widget(ModernButton(text="Pokaż logi", on_press=self.show_logs, height=dp(50), size_hint_y=None))
+        l.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home'), height=dp(55), size_hint_y=None, bg_color=(0.3,0.3,0.3,1)))
+        self.sc_ref["settings"].add_widget(l)
 
     def setup_paski_ui(self):
         self.sc_ref["paski"].clear_widgets()
@@ -1773,34 +2054,6 @@ class FutureApp(App):
         l.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home'), height=dp(55), size_hint_y=None, bg_color=(0.3,0.3,0.3,1)))
         self.sc_ref["paski"].add_widget(l)
         self.update_stats()
-
-    def setup_pracownicy_ui(self):
-        self.sc_ref["pracownicy"].clear_widgets()
-        b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
-        b.add_widget(Label(text="Moduł Pracownicy", bold=True, font_size="22sp", color=COLOR_PRIMARY))
-        b.add_widget(Label(text="Panel w przygotowaniu", color=(0.75,0.78,0.84,1)))
-        b.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home')))
-        self.sc_ref["pracownicy"].add_widget(b)
-
-    def setup_zaklady_ui(self):
-        self.sc_ref["zaklady"].clear_widgets()
-        b = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
-        b.add_widget(Label(text="Moduł Zakłady", bold=True, font_size="22sp", color=COLOR_PRIMARY))
-        b.add_widget(Label(text="Panel w przygotowaniu", color=(0.75,0.78,0.84,1)))
-        b.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home')))
-        self.sc_ref["zaklady"].add_widget(b)
-
-    def setup_settings_ui(self):
-        self.sc_ref["settings"].clear_widgets()
-        l = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
-        l.add_widget(Label(text="Ustawienia", bold=True, font_size="24sp", color=COLOR_PRIMARY))
-        l.add_widget(ModernButton(text="Dodaj bazę danych", on_press=lambda x: self.open_picker("book"), height=dp(50), size_hint_y=None))
-        l.add_widget(ModernButton(text="Ustawienia SMTP", on_press=lambda x: setattr(self.sm, 'current', 'smtp'), height=dp(50), size_hint_y=None))
-        l.add_widget(ModernButton(text="Edytuj szablon email", on_press=lambda x: setattr(self.sm, 'current', 'tmpl'), height=dp(50), size_hint_y=None))
-        l.add_widget(ModernButton(text="Wczytaj arkusz płac", on_press=lambda x: self.open_picker("data"), height=dp(50), size_hint_y=None))
-        l.add_widget(ModernButton(text="Pokaż logi", on_press=self.show_logs, height=dp(50), size_hint_y=None))
-        l.add_widget(ModernButton(text="Powrót", on_press=lambda x: setattr(self.sm, 'current', 'home'), height=dp(55), size_hint_y=None, bg_color=(0.3,0.3,0.3,1)))
-        self.sc_ref["settings"].add_widget(l)
 
     def toggle_pause_mailing(self, _=None):
         self.mailing_paused = not self.mailing_paused
