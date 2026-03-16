@@ -2184,6 +2184,78 @@ class FutureApp(App):
                 self.cb_paski_auto.active = value
         except: pass
 
+    def _cell_str(self, row, idx):
+        if idx == -1 or idx >= len(row):
+            return ""
+        v = row[idx]
+        return "" if v is None else str(v).strip()
+
+    def _norm_header(self, txt):
+        t = "" if txt is None else str(txt).strip().lower()
+        repl = {
+            'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ż': 'z', 'ź': 'z'
+        }
+        for a, b in repl.items():
+            t = t.replace(a, b)
+        return " ".join(t.replace("_", " ").replace("-", " ").split())
+
+    def _find_header_row_and_map(self, rows):
+        aliases = {
+            'name': ['imie', 'imi', 'name', 'first name'],
+            'surname': ['nazwisko', 'nazw', 'surname', 'last name'],
+            'email': ['email', 'e mail', 'mail'],
+            'pesel': ['pesel'],
+            'phone': ['telefon', 'tel', 'phone', 'kom'],
+            'plant': ['zaklad', 'zaklad pracy', 'plant', 'oddzial', 'dzial'],
+            'apartment': ['adres', 'mieszkanie', 'apart', 'lokal'],
+            'notes': ['notat', 'uwag', 'opis', 'notes'],
+            'shirt': ['koszul', 'shirt', 'tshirt', 't shirt'],
+            'hoodie': ['bluza', 'hoodie', 'hood'],
+            'pants': ['spodnie', 'spodn', 'pants', 'trous'],
+            'jacket': ['kurtka', 'kurt', 'jacket'],
+            'shoes': ['but', 'shoe', 'obuwie'],
+            'car_name': ['samochod', 'nazwa auta', 'pojazd', 'model', 'car', 'auto'],
+            'registration': ['rejestr', 'nr rej', 'tablica', 'plate', 'registration'],
+            'driver': ['kierowca', 'driver'],
+            'mileage': ['przebieg', 'km', 'mileage'],
+            'service_interval': ['interwal', 'serwis co', 'service interval'],
+            'last_service': ['ostatni serwis', 'last service'],
+            'city': ['miasto', 'city'],
+            'address': ['adres', 'address', 'ulica'],
+            'plant_phone': ['telefon zakladu', 'kontakt', 'contact phone', 'phone zaklad']
+        }
+
+        max_scan = min(len(rows), 25)
+        best_idx = -1
+        best_score = 0
+        best_map = {}
+
+        for ridx in range(max_scan):
+            row = rows[ridx]
+            headers = [self._norm_header(v) for v in row]
+            mapping = {}
+            for field, keys in aliases.items():
+                found = -1
+                for cidx, hv in enumerate(headers):
+                    if not hv:
+                        continue
+                    if any(k in hv for k in keys):
+                        found = cidx
+                        break
+                mapping[field] = found
+
+            score = sum(1 for v in mapping.values() if v != -1)
+            if mapping['name'] != -1 and mapping['surname'] != -1:
+                score += 4
+            if mapping['registration'] != -1:
+                score += 2
+            if score > best_score:
+                best_score = score
+                best_idx = ridx
+                best_map = mapping
+
+        return best_idx, best_map
+
     def process_book(self, path):
         try:
             if load_workbook is None:
@@ -2191,127 +2263,167 @@ class FutureApp(App):
                 return
 
             wb = load_workbook(path, data_only=True)
-            ws = wb.active
-            raw = list(ws.iter_rows(values_only=True))
-            if not raw or not raw[0]:
+            if not wb.worksheets:
                 self.msg("Błąd", "Pusty plik")
-                return
-
-            headers = ["" if v is None else str(v).strip() for v in raw[0]]
-            h_low = [h.lower() for h in headers]
-
-            def find_col(keywords):
-                for i, v in enumerate(h_low):
-                    if any(k in v for k in keywords):
-                        return i
-                return -1
-
-            # podstawowe pola wspólne
-            iN = find_col(['imi', 'imie', 'name'])
-            iS = find_col(['nazw', 'naz', 'surname'])
-            iE = find_col(['mail', '@'])
-            iP = find_col(['pesel'])
-            iPhone = find_col(['tel', 'telefon', 'phone'])
-            iPlant = find_col(['zak', 'zaklad', 'plant'])
-            iApartment = find_col(['adres', 'miesz', 'apart'])
-            iNotes = find_col(['notat', 'uwag', 'opis', 'notes'])
-
-            # pola rozmiarów
-            iShirt = find_col(['kosz', 'shirt', 'tshirt', 't-shirt'])
-            iHoodie = find_col(['bluz', 'hoodie', 'hood'])
-            iPants = find_col(['spod', 'pants', 'trous'])
-            iJacket = find_col(['kurt', 'jacket'])
-            iShoes = find_col(['but', 'shoe'])
-
-            if iN == -1 or iS == -1:
-                self.msg("Błąd", "Nie wykryto kolumn imię/nazwisko")
                 return
 
             imported_contacts = 0
             imported_workers = 0
             imported_sizes = 0
+            imported_cars = 0
+            imported_plants = 0
+            touched_sheets = 0
 
-            for r in raw[1:]:
-                try:
-                    n = r[iN] if iN < len(r) and r[iN] is not None else ""
-                    sname = r[iS] if iS < len(r) and r[iS] is not None else ""
-                    n = str(n).strip()
-                    sname = str(sname).strip()
-                    if not n or not sname:
-                        continue
+            for ws in wb.worksheets:
+                raw = list(ws.iter_rows(values_only=True))
+                if not raw:
+                    continue
 
-                    email = r[iE] if iE != -1 and iE < len(r) and r[iE] is not None else ""
-                    pesel = r[iP] if iP != -1 and iP < len(r) and r[iP] is not None else ""
-                    phone = r[iPhone] if iPhone != -1 and iPhone < len(r) and r[iPhone] is not None else ""
-                    plant = r[iPlant] if iPlant != -1 and iPlant < len(r) and r[iPlant] is not None else ""
-                    apartment = r[iApartment] if iApartment != -1 and iApartment < len(r) and r[iApartment] is not None else ""
-                    notes = r[iNotes] if iNotes != -1 and iNotes < len(r) and r[iNotes] is not None else ""
+                h_idx, m = self._find_header_row_and_map(raw)
+                if h_idx == -1:
+                    continue
 
-                    # kontakt
-                    self.conn.execute(
-                        "INSERT OR REPLACE INTO contacts (name,surname,email,pesel,phone,workplace,apartment,notes) VALUES (?,?,?,?,?,?,?,?)",
-                        (n.lower(), sname.lower(), str(email).strip(), str(pesel).strip(), str(phone).strip(), str(plant).strip(), str(apartment).strip(), str(notes).strip())
-                    )
-                    imported_contacts += 1
+                touched_sheets += 1
+                has_name_surname = m.get('name', -1) != -1 and m.get('surname', -1) != -1
+                has_sizes = any(m.get(k, -1) != -1 for k in ('shirt', 'hoodie', 'pants', 'jacket', 'shoes'))
+                has_car = m.get('registration', -1) != -1 or m.get('car_name', -1) != -1
+                has_plant = m.get('plant', -1) != -1
 
-                    # pracownik
-                    wr = self.conn.execute(
-                        "SELECT id FROM workers WHERE lower(name)=lower(?) AND lower(surname)=lower(?) LIMIT 1",
-                        (n, sname)
-                    ).fetchone()
-                    if wr:
-                        self.conn.execute(
-                            "UPDATE workers SET plant=?, phone=? WHERE id=?",
-                            (str(plant).strip(), str(phone).strip(), wr[0])
-                        )
-                    else:
-                        self.conn.execute(
-                            "INSERT INTO workers(name, surname, plant, phone, position, hire_date) VALUES(?,?,?,?,?,?)",
-                            (n, sname, str(plant).strip(), str(phone).strip(), "", "")
-                        )
-                    imported_workers += 1
+                for r in raw[h_idx + 1:]:
+                    try:
+                        n = self._cell_str(r, m.get('name', -1))
+                        sname = self._cell_str(r, m.get('surname', -1))
+                        plant = self._cell_str(r, m.get('plant', -1))
 
-                    # rozmiary - zapisuj jeśli znaleziono choć jedną kolumnę rozmiarową
-                    has_size_cols = any(idx != -1 for idx in [iShirt, iHoodie, iPants, iJacket, iShoes])
-                    if has_size_cols:
-                        shirt = r[iShirt] if iShirt != -1 and iShirt < len(r) and r[iShirt] is not None else ""
-                        hoodie = r[iHoodie] if iHoodie != -1 and iHoodie < len(r) and r[iHoodie] is not None else ""
-                        pants = r[iPants] if iPants != -1 and iPants < len(r) and r[iPants] is not None else ""
-                        jacket = r[iJacket] if iJacket != -1 and iJacket < len(r) and r[iJacket] is not None else ""
-                        shoes = r[iShoes] if iShoes != -1 and iShoes < len(r) and r[iShoes] is not None else ""
-                        sz = self.conn.execute(
-                            "SELECT id FROM clothes_sizes WHERE lower(name)=lower(?) AND lower(surname)=lower(?) LIMIT 1",
-                            (n, sname)
-                        ).fetchone()
-                        if sz:
+                        # kontakty + pracownicy
+                        if has_name_surname and n and sname:
+                            email = self._cell_str(r, m.get('email', -1))
+                            pesel = self._cell_str(r, m.get('pesel', -1))
+                            phone = self._cell_str(r, m.get('phone', -1))
+                            apartment = self._cell_str(r, m.get('apartment', -1))
+                            notes = self._cell_str(r, m.get('notes', -1))
+
                             self.conn.execute(
-                                "UPDATE clothes_sizes SET plant=?, shirt=?, hoodie=?, pants=?, jacket=?, shoes=? WHERE id=?",
-                                (str(plant).strip(), str(shirt).strip(), str(hoodie).strip(), str(pants).strip(), str(jacket).strip(), str(shoes).strip(), sz[0])
+                                "INSERT OR REPLACE INTO contacts (name,surname,email,pesel,phone,workplace,apartment,notes) VALUES (?,?,?,?,?,?,?,?)",
+                                (n.lower(), sname.lower(), email, pesel, phone, plant, apartment, notes)
                             )
-                        else:
+                            imported_contacts += 1
+
+                            wr = self.conn.execute(
+                                "SELECT id FROM workers WHERE lower(name)=lower(?) AND lower(surname)=lower(?) LIMIT 1",
+                                (n, sname)
+                            ).fetchone()
+                            if wr:
+                                self.conn.execute(
+                                    "UPDATE workers SET plant=?, phone=? WHERE id=?",
+                                    (plant, phone, wr[0])
+                                )
+                            else:
+                                self.conn.execute(
+                                    "INSERT INTO workers(name, surname, plant, phone, position, hire_date) VALUES(?,?,?,?,?,?)",
+                                    (n, sname, plant, phone, "", "")
+                                )
+                            imported_workers += 1
+
+                            if has_sizes:
+                                shirt = self._cell_str(r, m.get('shirt', -1))
+                                hoodie = self._cell_str(r, m.get('hoodie', -1))
+                                pants = self._cell_str(r, m.get('pants', -1))
+                                jacket = self._cell_str(r, m.get('jacket', -1))
+                                shoes = self._cell_str(r, m.get('shoes', -1))
+
+                                if any([shirt, hoodie, pants, jacket, shoes]):
+                                    sz = self.conn.execute(
+                                        "SELECT id FROM clothes_sizes WHERE lower(name)=lower(?) AND lower(surname)=lower(?) LIMIT 1",
+                                        (n, sname)
+                                    ).fetchone()
+                                    if sz:
+                                        self.conn.execute(
+                                            "UPDATE clothes_sizes SET plant=?, shirt=?, hoodie=?, pants=?, jacket=?, shoes=? WHERE id=?",
+                                            (plant, shirt, hoodie, pants, jacket, shoes, sz[0])
+                                        )
+                                    else:
+                                        self.conn.execute(
+                                            "INSERT INTO clothes_sizes (name, surname, plant, shirt, hoodie, pants, jacket, shoes) VALUES (?,?,?,?,?,?,?,?)",
+                                            (n, sname, plant, shirt, hoodie, pants, jacket, shoes)
+                                        )
+                                    imported_sizes += 1
+
+                        # auta (moduł cars)
+                        if has_car:
+                            reg = self._cell_str(r, m.get('registration', -1)).upper()
+                            car_name = self._cell_str(r, m.get('car_name', -1))
+                            driver = self._cell_str(r, m.get('driver', -1))
+                            mileage_raw = self._cell_str(r, m.get('mileage', -1))
+                            interval_raw = self._cell_str(r, m.get('service_interval', -1))
+                            last_service_raw = self._cell_str(r, m.get('last_service', -1))
+
+                            if reg or car_name:
+                                if not car_name:
+                                    car_name = reg or "Auto"
+                                if not reg:
+                                    reg = car_name.upper()
+
+                                def to_int(v, default=0):
+                                    try:
+                                        s = str(v).replace(' ', '').replace(',', '.').strip()
+                                        if not s:
+                                            return default
+                                        return int(float(s))
+                                    except Exception:
+                                        return default
+
+                                mileage = max(0, to_int(mileage_raw, 0))
+                                interval = max(1, to_int(interval_raw, 15000))
+                                last_service = max(0, to_int(last_service_raw, 0))
+
+                                ex = self.conn.execute(
+                                    "SELECT id FROM cars WHERE upper(registration)=upper(?) LIMIT 1",
+                                    (reg,)
+                                ).fetchone()
+                                if ex:
+                                    self.conn.execute(
+                                        "UPDATE cars SET name=?, driver=?, mileage=?, service_interval=?, last_service=? WHERE id=?",
+                                        (car_name, driver, mileage, interval, last_service, ex[0])
+                                    )
+                                else:
+                                    self.conn.execute(
+                                        "INSERT INTO cars(name, registration, driver, mileage, service_interval, last_service) VALUES(?,?,?,?,?,?)",
+                                        (car_name, reg, driver, mileage, interval, last_service)
+                                    )
+                                imported_cars += 1
+
+                        # zakłady
+                        if has_plant and plant:
+                            city = self._cell_str(r, m.get('city', -1))
+                            address = self._cell_str(r, m.get('address', -1))
+                            plant_phone = self._cell_str(r, m.get('plant_phone', -1))
+                            notes = self._cell_str(r, m.get('notes', -1))
+
                             self.conn.execute(
-                                "INSERT INTO clothes_sizes (name, surname, plant, shirt, hoodie, pants, jacket, shoes) VALUES (?,?,?,?,?,?,?,?)",
-                                (n, sname, str(plant).strip(), str(shirt).strip(), str(hoodie).strip(), str(pants).strip(), str(jacket).strip(), str(shoes).strip())
+                                "INSERT INTO plants(name, city, address, contact_phone, notes) VALUES(?,?,?,?,?) "
+                                "ON CONFLICT(name) DO UPDATE SET city=excluded.city, address=excluded.address, contact_phone=excluded.contact_phone, notes=excluded.notes",
+                                (plant, city, address, plant_phone, notes)
                             )
-                        imported_sizes += 1
-                except Exception:
-                    self.log(f"process_book row import error: {traceback.format_exc()}")
+                            imported_plants += 1
+                    except Exception:
+                        self.log(f"process_book row import error [{ws.title}]: {traceback.format_exc()}")
+
+            if touched_sheets == 0:
+                self.msg("Błąd", "Nie wykryto nagłówków danych w żadnym arkuszu")
+                return
 
             self.conn.commit()
             self.sync_all_contact_links()
-
-            try:
-                clothes_count = self.conn.execute("SELECT COUNT(*) FROM clothes_sizes").fetchone()[0]
-            except Exception:
-                clothes_count = 0
-
             self._increment_db_version()
             self.update_stats()
             self.msg(
                 "OK",
-                f"Import zakończony.\nKontakty: {imported_contacts}\nPracownicy: {imported_workers}\nRozmiary: {imported_sizes}\nRazem rekordów rozmiarów w bazie: {clothes_count}"
+                f"Import zakończony (arkusze: {touched_sheets}).\nKontakty: {imported_contacts}\nPracownicy: {imported_workers}\nRozmiary: {imported_sizes}\nAuta: {imported_cars}\nZakłady: {imported_plants}"
             )
-            self.log(f"Imported book: {path} | contacts={imported_contacts} workers={imported_workers} sizes={imported_sizes}")
+            self.log(
+                f"Imported workbook(all sheets): {path} | sheets={touched_sheets} contacts={imported_contacts} workers={imported_workers} sizes={imported_sizes} cars={imported_cars} plants={imported_plants}"
+            )
         except Exception as e:
             self.log(f"process_book error: {traceback.format_exc()}")
             self.msg("BŁĄD", f"Nieudany import: {str(e)[:120]}")
