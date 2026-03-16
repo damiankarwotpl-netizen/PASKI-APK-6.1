@@ -31,6 +31,7 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.checkbox import CheckBox
 from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
 from kivy.uix.progressbar import ProgressBar
+from kivy.animation import Animation
 from kivy.graphics import Color, Rectangle, RoundedRectangle, Line
 
 try:
