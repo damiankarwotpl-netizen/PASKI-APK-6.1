@@ -19,6 +19,7 @@ from kivy.metrics import dp
 from kivy.clock import Clock
 from kivy.utils import platform
 from kivy.core.window import Window
+from kivy.core.text import Label as CoreLabel
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
@@ -82,6 +83,8 @@ class ModernButton(Button):
         self.bold = True
         self.radius = [dp(12)]
         self.base_color = bg_color
+        self._font_max = float(getattr(self, 'font_size', dp(16)))
+        self._font_min = float(dp(10))
         with self.canvas.before:
             self.bg = Color(*self.base_color)
             self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=self.radius)
@@ -92,16 +95,38 @@ class ModernButton(Button):
             state_handler = self._fallback_update_state
         self.halign = 'center'
         self.valign = 'middle'
-        self.shorten = True
+        self.shorten = False
         self.max_lines = 1
-        self.bind(pos=self._update, size=self._update, state=state_handler)
+        self.bind(pos=self._update, size=self._update, state=state_handler, text=self._update)
         state_handler()
         self._update()
+
+    def _fit_single_line_text(self):
+        txt = (self.text or '').strip()
+        if not txt:
+            self.font_size = self._font_max
+            return
+        available = max(dp(20), self.width - dp(20))
+        chosen = self._font_max
+        chosen_w = 0
+        for fs in range(int(self._font_max), int(self._font_min) - 1, -1):
+            probe = CoreLabel(text=txt, font_size=fs, bold=self.bold)
+            probe.refresh()
+            tw = (probe.texture.size[0] if probe.texture else 0)
+            chosen_w = max(chosen_w, tw)
+            if tw <= available:
+                chosen = fs
+                chosen_w = tw
+                break
+        self.font_size = chosen
+        if self.size_hint_x is None:
+            self.width = max(self.width, chosen_w + dp(20))
 
     def _update(self, *args):
         self.rect.pos, self.rect.size = self.pos, self.size
         self.border_line.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(12))
-        self.text_size = (max(dp(10), self.width - dp(12)), None)
+        self.text_size = (None, None)
+        self._fit_single_line_text()
 
     def _fallback_update_state(self, *args):
         factor = 0.82 if self.state == 'down' else 1.0
