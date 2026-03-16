@@ -245,17 +245,18 @@ class ClothesOrdersScreen(Screen):
     def refresh(self):
         self.list_layout.clear_widgets()
         rows = App.get_running_app().conn.execute("""
-        SELECT id,date,plant,status FROM clothes_orders ORDER BY id DESC
+        SELECT id,date,plant,status,COALESCE(order_desc,'') FROM clothes_orders ORDER BY id DESC
         """).fetchall()
         for r in rows:
             box = BoxLayout(size_hint_y=None, height=dp(90), padding=dp(6), spacing=dp(8))
-            lbl = Label(text=f"#{r[0]}  {r[1]}  {r[2]}  [{r[3]}]", size_hint_x=0.55, halign='left', valign='middle')
+            desc = (r[4] or '').strip()
+            desc_txt = f"\nOpis: {desc}" if desc else ""
+            lbl = Label(text=f"#{r[0]}  {r[1]}  {r[2]}  [{r[3]}]{desc_txt}", size_hint_x=0.55, halign='left', valign='middle')
             lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(12), None)))
 
             actions = BoxLayout(size_hint_x=0.45, spacing=dp(6))
             actions.add_widget(ModernButton(text="Szczegóły", size_hint_x=None, width=dp(90), on_press=lambda x, i=r[0]: App.get_running_app().clothes_order_details(i)))
-            actions.add_widget(ModernButton(text="PDF", size_hint_x=None, width=dp(70), on_press=lambda x, i=r[0]: App.get_running_app().clothes_order_pdf(i)))
-            actions.add_widget(ModernButton(text="Zamówione", size_hint_x=None, width=dp(90), on_press=lambda x, i=r[0]: App.get_running_app().mark_order_ordered(i)))
+            actions.add_widget(ModernButton(text="Zamów", size_hint_x=None, width=dp(90), on_press=lambda x, i=r[0]: App.get_running_app().mark_order_ordered(i)))
             actions.add_widget(ModernButton(text="WYDAJ", size_hint_x=None, width=dp(80), on_press=lambda x, i=r[0]: App.get_running_app().clothes_issue_all(i)))
 
             box.add_widget(lbl)
@@ -586,7 +587,8 @@ class FutureApp(App):
         id INTEGER PRIMARY KEY,
         date TEXT,
         plant TEXT,
-        status TEXT
+        status TEXT,
+        order_desc TEXT
         )
         """)
         self.conn.execute("""
@@ -662,6 +664,7 @@ class FutureApp(App):
         self._add_column_if_missing('clothes_order_items', 'item', 'TEXT')
         self._add_column_if_missing('clothes_order_items', 'qty', 'INTEGER')
         self._add_column_if_missing('clothes_order_items', 'issued', 'INTEGER')
+        self._add_column_if_missing('clothes_orders', 'order_desc', 'TEXT')
         self._add_column_if_missing('workers', 'phone', 'TEXT')
         self._add_column_if_missing('workers', 'position', 'TEXT')
         self._add_column_if_missing('workers', 'hire_date', 'TEXT')
@@ -1202,10 +1205,10 @@ class FutureApp(App):
                 })
         return entries
 
-    def _save_clothes_order_entries(self, plant, entries):
+    def _save_clothes_order_entries(self, plant, order_desc, entries):
         cur = self.conn.cursor()
-        cur.execute("INSERT INTO clothes_orders(date,plant,status) VALUES(?,?,?)",
-                    (datetime.now().strftime('%Y-%m-%d %H:%M'), plant, 'Nowe'))
+        cur.execute("INSERT INTO clothes_orders(date,plant,status,order_desc) VALUES(?,?,?,?)",
+                    (datetime.now().strftime('%Y-%m-%d %H:%M'), plant, 'Nowe', order_desc))
         order_id = cur.lastrowid
         for e in entries:
             cur.execute("""
@@ -1214,6 +1217,40 @@ class FutureApp(App):
             """, (order_id, e['worker_id'], e['name'], e['surname'], e['item'], e['size'], e['qty']))
         self.conn.commit()
         return order_id
+
+    def _load_clothes_order_entries(self, order_id):
+        rows = self.conn.execute("""
+        SELECT COALESCE(coi.worker_id, 0),
+               COALESCE(w.name, coi.name, ''),
+               COALESCE(w.surname, coi.surname, ''),
+               COALESCE(coi.item, ''),
+               COALESCE(coi.size, ''),
+               COALESCE(coi.qty, 1)
+        FROM clothes_order_items coi
+        LEFT JOIN workers w ON w.id = coi.worker_id
+        WHERE coi.order_id=?
+        ORDER BY COALESCE(w.surname, coi.surname, ''), COALESCE(w.name, coi.name, ''), COALESCE(coi.item, '')
+        """, (order_id,)).fetchall()
+        entries = []
+        for r in rows:
+            entries.append({
+                'worker_id': r[0],
+                'name': r[1],
+                'surname': r[2],
+                'item': r[3],
+                'size': r[4],
+                'qty': int(r[5] or 1),
+            })
+        return entries
+
+    def generate_order_excels(self, order_id):
+        entries = self._load_clothes_order_entries(order_id)
+        if not entries:
+            self.msg('Info', 'Brak pozycji do eksportu Excel')
+            return
+        p1, p2 = self._export_clothes_order_excels(order_id, entries)
+        if p1 and p2:
+            self.msg('OK', f"Excel wygenerowany.\n1) Hurtownia: {p1}\n2) Wydanie dla pracowników: {p2}")
 
     def _export_clothes_order_excels(self, order_id, entries):
         if Workbook is None:
@@ -1269,9 +1306,11 @@ class FutureApp(App):
             wrap.add_widget(ti)
             return wrap, ti
 
-        plant_wrap, plant_ti = labeled_input('Zakład zamówienia', 'Zakład (filtr / opis zamówienia)')
+        plant_wrap, plant_ti = labeled_input('Zakład zamówienia', 'Zakład (filtr pracowników)')
+        desc_wrap, desc_ti = labeled_input('Nazwa / opis zamówienia', 'Np. Zamówienie zimowe - brygada A')
         search_wrap, search_ti = labeled_input('Wyszukiwarka pracownika', 'Szukaj pracownika...')
         root.add_widget(plant_wrap)
+        root.add_widget(desc_wrap)
         root.add_widget(search_wrap)
 
         workers_grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(4))
@@ -1325,7 +1364,7 @@ class FutureApp(App):
             if not chosen:
                 return self.msg('Błąd', 'Wybierz co najmniej jednego pracownika')
             p.dismiss()
-            self._create_order_items_ui(chosen, plant_ti.text.strip())
+            self._create_order_items_ui(chosen, plant_ti.text.strip(), desc_ti.text.strip())
 
         search_ti.bind(text=refresh_filter)
         plant_ti.bind(text=refresh_filter)
@@ -1339,7 +1378,7 @@ class FutureApp(App):
         p = Popup(title='Nowe zamówienie - wybór pracowników', content=root, size_hint=(0.95,0.95))
         p.open()
 
-    def _create_order_items_ui(self, selected_workers, plant):
+    def _create_order_items_ui(self, selected_workers, plant, order_desc):
         root = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(8))
         root.add_widget(Label(text='Konfiguracja zamówienia (ilości per pracownik)', bold=True, size_hint_y=None, height=dp(34)))
 
@@ -1395,8 +1434,7 @@ class FutureApp(App):
             entries = self._collect_order_entries(selected_workers, worker_forms)
             if not entries:
                 return self.msg('Błąd', 'Brak pozycji do zamówienia')
-            order_id = self._save_clothes_order_entries(plant, entries)
-            p1, p2 = self._export_clothes_order_excels(order_id, entries)
+            order_id = self._save_clothes_order_entries(plant, order_desc, entries)
             p.dismiss()
             try:
                 scr = self.clothes_sm.get_screen('orders')
@@ -1404,11 +1442,11 @@ class FutureApp(App):
                     scr.refresh()
             except Exception:
                 pass
-            self.msg('OK', f"Zamówienie #{order_id} zapisane.\nRaport hurtowni: {p1}\nRaport wydania: {p2}")
+            self.msg('OK', f"Zamówienie #{order_id} zapisane")
 
         row_btn = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(6))
         row_btn.add_widget(ModernButton(text='Zamów wszystko', on_press=order_all, font_size='16sp'))
-        row_btn.add_widget(ModernButton(text='Zapisz i generuj Excel', on_press=save_order, bg_color=(0.16,0.56,0.33,1), font_size='16sp'))
+        row_btn.add_widget(ModernButton(text='Zapisz zamówienie', on_press=save_order, bg_color=(0.16,0.56,0.33,1), font_size='16sp'))
         root.add_widget(row_btn)
 
         p = Popup(title='Nowe zamówienie - pozycje i ilości', content=root, size_hint=(0.97,0.97))
@@ -1416,8 +1454,15 @@ class FutureApp(App):
 
     def clothes_order_details(self, order_id):
         cur = self.conn.cursor()
+        order_meta = cur.execute("SELECT COALESCE(order_desc,''), COALESCE(status,''), COALESCE(plant,'') FROM clothes_orders WHERE id=?", (order_id,)).fetchone()
+        order_desc = (order_meta[0] if order_meta else '') or ''
+        order_status = (order_meta[1] if order_meta else '') or ''
+        order_plant = (order_meta[2] if order_meta else '') or ''
         root = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(8))
         root.add_widget(Label(text=f"Szczegóły zamówienia #{order_id}", bold=True, size_hint_y=None, height=dp(40)))
+        if order_desc:
+            root.add_widget(Label(text=f"Opis: {order_desc}", size_hint_y=None, height=dp(28), halign='left'))
+        root.add_widget(Label(text=f"Zakład: {order_plant}    Status: {order_status}", size_hint_y=None, height=dp(28), halign='left'))
         grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(6))
         grid.bind(minimum_height=grid.setter('height'))
         rows = cur.execute("""
@@ -1443,10 +1488,14 @@ class FutureApp(App):
         root.add_widget(scroll)
         bottom = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(8))
         bottom.add_widget(ModernButton(text="Dodaj pozycję", on_press=lambda x: self._add_position_to_order_ui(order_id, p)))
-        bottom.add_widget(ModernButton(text="PDF wydania", on_press=lambda x: self.clothes_issue_pdf(order_id)))
+        bottom.add_widget(ModernButton(text="Generuj Excel x2 (hurtownia + wydanie)", on_press=lambda x: self.generate_order_excels(order_id)))
+        bottom.add_widget(ModernButton(text="Zamów", on_press=lambda x: self.mark_order_ordered(order_id)))
         bottom.add_widget(ModernButton(text="Wydaj wszystkie", on_press=lambda x: [self.clothes_issue_all(order_id), p.dismiss()]))
         root.add_widget(bottom)
-        p = Popup(title=f"Zamówienie #{order_id}", content=root, size_hint=(0.95,0.95))
+        popup_title = f"Zamówienie #{order_id}"
+        if order_desc:
+            popup_title = f"{popup_title} - {order_desc}"
+        p = Popup(title=popup_title, content=root, size_hint=(0.95,0.95))
         p.open()
 
     def _remove_order_item_and_refresh(self, cid, order_id, popup):
