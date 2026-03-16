@@ -2231,6 +2231,11 @@ class FutureApp(App):
             digits = digits[-11:]
         return digits
 
+    def _normalize_plant_name(self, value):
+        s = self._clean_excel_number_text(value)
+        return " ".join(s.split())
+
+
     def _find_header_row_and_map(self, rows):
         aliases = {
             'name': ['imie', 'imi', 'name', 'first name'],
@@ -2238,7 +2243,7 @@ class FutureApp(App):
             'email': ['email', 'e mail', 'mail'],
             'pesel': ['pesel'],
             'phone': ['telefon', 'tel', 'phone', 'kom'],
-            'plant': ['zaklad', 'zaklad pracy', 'plant', 'oddzial', 'dzial', 'pracownicy'],
+            'plant': ['zaklad', 'zaklad pracy', 'plant', 'oddzial', 'dzial', 'pracownicy', 'firma', 'company', 'pracodawca'],
             'apartment': ['adres', 'mieszkanie', 'apart', 'lokal'],
             'notes': ['notat', 'uwag', 'opis', 'notes'],
             'shirt': ['koszul', 'shirt', 'tshirt', 't shirt'],
@@ -2345,7 +2350,7 @@ class FutureApp(App):
                     try:
                         n = self._clean_excel_number_text(self._cell_str(r, m.get('name', -1)))
                         sname = self._clean_excel_number_text(self._cell_str(r, m.get('surname', -1)))
-                        plant = self._clean_excel_number_text(self._cell_str(r, m.get('plant', -1)))
+                        plant = self._normalize_plant_name(self._cell_str(r, m.get('plant', -1)))
 
                         if has_name_surname and n and sname:
                             email = self._clean_excel_number_text(self._cell_str(r, m.get('email', -1))).lower()
@@ -2412,7 +2417,27 @@ class FutureApp(App):
                             address = self._clean_excel_number_text(self._cell_str(r, m.get('address', -1)))
                             plant_phone = self._normalize_phone(self._cell_str(r, m.get('plant_phone', -1)))
                             notes = self._clean_excel_number_text(self._cell_str(r, m.get('notes', -1)))
-                            plants_map[plant] = (city, address, plant_phone, notes)
+                            pkey = plant.lower()
+                            cur = plants_map.get(pkey)
+                            if not cur:
+                                plants_map[pkey] = {
+                                    'name': plant,
+                                    'city': city,
+                                    'address': address,
+                                    'phone': plant_phone,
+                                    'notes': notes
+                                }
+                            else:
+                                if len(plant) > len(cur.get('name', '')):
+                                    cur['name'] = plant
+                                if city and not cur.get('city'):
+                                    cur['city'] = city
+                                if address and not cur.get('address'):
+                                    cur['address'] = address
+                                if plant_phone and not cur.get('phone'):
+                                    cur['phone'] = plant_phone
+                                if notes and not cur.get('notes'):
+                                    cur['notes'] = notes
                     except Exception:
                         self.log(f"process_book row import error [{ws.title}]: {traceback.format_exc()}")
 
@@ -2504,7 +2529,7 @@ class FutureApp(App):
                 self.conn.executemany(
                     "INSERT INTO plants(name, city, address, contact_phone, notes) VALUES(?,?,?,?,?) "
                     "ON CONFLICT(name) DO UPDATE SET city=excluded.city, address=excluded.address, contact_phone=excluded.contact_phone, notes=excluded.notes",
-                    [(name, vals[0], vals[1], vals[2], vals[3]) for name, vals in plants_map.items()]
+                    [(vals['name'], vals.get('city', ''), vals.get('address', ''), vals.get('phone', ''), vals.get('notes', '')) for vals in plants_map.values()]
                 )
 
             imported_contacts = len(contacts_rows)
