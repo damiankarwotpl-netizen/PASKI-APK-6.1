@@ -1500,28 +1500,29 @@ class FutureApp(App):
 
     def setup_table_ui(self):
         self.sc_ref["table"].clear_widgets()
-        root = BoxLayout(orientation="vertical")
-        menu = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(5), padding=dp(5))
+        shell = AppLayout(title="Podgląd i eksport")
+        shell.nav_tabs.add_action(SecondaryButton(text="Wróć", on_press=lambda x: setattr(self.sm, 'current', 'paski')))
+        shell.nav_tabs.add_action(PrimaryButton(text="Kolumny", on_press=self.popup_columns, size_hint_x=None, width=dp(150)))
+
+        root = BoxLayout(orientation="vertical", spacing=dp(8))
         self.ti_tab_search = ModernInput(hint_text="Szukaj w tabeli...")
         self.ti_tab_search.bind(text=self.filter_table)
-        menu.add_widget(self.ti_tab_search)
-        menu.add_widget(Button(text="KOLUMNY", size_hint_x=0.2, on_press=self.popup_columns))
-        menu.add_widget(Button(text="WRÓĆ", size_hint_x=0.2, on_press=lambda x: setattr(self.sm, 'current', 'paski')))
+        root.add_widget(self.ti_tab_search)
 
-        hs = ScrollView(size_hint_y=None, height=dp(55), do_scroll_y=False)
-        self.table_header_layout = GridLayout(rows=1, size_hint=(None, None), height=dp(55))
+        hs = ScrollView(size_hint_y=None, height=dp(58), do_scroll_y=False)
+        self.table_header_layout = GridLayout(rows=1, size_hint=(None, None), height=dp(58))
         hs.add_widget(self.table_header_layout)
 
         ds = ScrollView(do_scroll_x=True, do_scroll_y=True)
-        self.table_content_layout = GridLayout(size_hint=(None, None))
+        self.table_content_layout = GridLayout(size_hint=(None, None), spacing=dp(2))
         self.table_content_layout.bind(minimum_height=self.table_content_layout.setter('height'), minimum_width=self.table_content_layout.setter('width'))
         ds.add_widget(self.table_content_layout)
         ds.bind(scroll_x=lambda inst, val: setattr(hs, 'scroll_x', val))
 
-        root.add_widget(menu)
         root.add_widget(hs)
         root.add_widget(ds)
-        self.sc_ref["table"].add_widget(root)
+        shell.set_content(root)
+        self.sc_ref["table"].add_widget(shell)
 
     def refresh_table(self):
         self.table_content_layout.clear_widgets()
@@ -1552,17 +1553,15 @@ class FutureApp(App):
 
     def setup_clothes_container(self):
         self.sc_ref["clothes"].clear_widgets()
-        container = BoxLayout(orientation='vertical')
-        hs = ScrollView(size_hint_y=None, height=dp(56), do_scroll_x=True)
-        inner = BoxLayout(size_hint_x=None, height=dp(56))
-        inner.bind(minimum_width=inner.setter('width'))
-        btn_w = dp(160)
-        inner.add_widget(ModernButton(text="Rozmiary", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'sizes')))
-        inner.add_widget(ModernButton(text="Zamówienia", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'orders')))
-        inner.add_widget(ModernButton(text="Raporty", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'reports')))
-        inner.add_widget(ModernButton(text="Wróć", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.sm, 'current', 'home')))
-        hs.add_widget(inner)
-        container.add_widget(hs)
+        shell = AppLayout(title="Ubranie robocze")
+        shell.nav_tabs.add_action(SecondaryButton(text="Wróć", on_press=lambda x: setattr(self.sm, 'current', 'home')))
+
+        tabs = AppActionBar()
+        btn_w = dp(170)
+        tabs.add_action(PrimaryButton(text="Rozmiary", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'sizes')))
+        tabs.add_action(PrimaryButton(text="Zamówienia", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'orders')))
+        tabs.add_action(PrimaryButton(text="Raporty", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'reports')))
+
         self.clothes_sm = ScreenManager(transition=SlideTransition())
         self.clothes_sm.add_widget(ClothesSizesScreen(name='sizes'))
         self.clothes_sm.add_widget(ClothesOrdersScreen(name='orders'))
@@ -1570,9 +1569,14 @@ class FutureApp(App):
         self.clothes_sm.current = 'sizes'
         self._clothes_nav_bound = False
         self._bind_clothes_navigation()
-        container.add_widget(self.clothes_sm)
-        self.sc_ref["clothes"].add_widget(container)
+
+        body = BoxLayout(orientation='vertical', spacing=dp(8))
+        body.add_widget(tabs)
+        body.add_widget(self.clothes_sm)
+        shell.set_content(body)
+        self.sc_ref["clothes"].add_widget(shell)
         self._push_nav_state()
+
         try:
             scr = self.clothes_sm.get_screen('sizes')
             if hasattr(scr, 'build_ui'):
@@ -2172,19 +2176,34 @@ class FutureApp(App):
 
     def setup_email_ui(self):
         self.sc_ref["email"].clear_widgets()
-        l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10))
-        ab = BoxLayout(size_hint_y=None, height=dp(45), spacing=dp(10))
+        shell = AppLayout(title="Moduł Email")
+        shell.nav_tabs.add_action(SecondaryButton(text="Wróć", on_press=lambda x: setattr(self.sm, 'current', 'home')))
+        shell.nav_tabs.add_action(SecondaryButton(text="SMTP", on_press=lambda x: setattr(self.sm, 'current', 'smtp')))
+
+        body = BoxLayout(orientation="vertical", spacing=dp(10))
+        auto_card = Card(orientation="horizontal", size_hint_y=None, height=dp(54), spacing=dp(10))
         self.cb_auto = CheckBox(size_hint_x=None, width=dp(45))
         self.cb_auto.active = self.auto_send_mode
         self.cb_auto.bind(active=self.on_auto_checkbox_changed)
-        ab.add_widget(self.cb_auto); ab.add_widget(Label(text="AUTOMATYCZNA WYSYŁKA", bold=True)); l.add_widget(ab)
-        self.lbl_stats = Label(text="Baza: 0", height=dp(30)); l.add_widget(self.lbl_stats)
-        l.add_widget(ModernButton(text="WYCZYŚĆ ZAŁĄCZNIKI", on_press=self.clear_all_attachments, height=dp(45), size_hint_y=None, bg_color=(0.7, 0.1, 0.1, 1)))
-        self.pb_label = Label(text="Gotowy", height=dp(25)); self.pb = ProgressBar(max=100, height=dp(20)); l.add_widget(self.pb_label); l.add_widget(self.pb)
-        btns = [("EDYTUJ SZABLON", lambda x: setattr(self.sm, 'current', 'tmpl')), ("DODAJ ZAŁĄCZNIK", lambda x: self.open_picker("attachment")), ("WYŚLIJ JEDEN PLIK", self.start_special_send_flow), ("START MASOWA WYSYŁKA", self.start_mass_mailing)]
-        for t, c in btns: l.add_widget(ModernButton(text=t, on_press=c, height=dp(50), size_hint_y=None))
-        l.add_widget(ModernButton(text="PAUZA/RESUME WYSYŁKI", on_press=self.toggle_pause_mailing, height=dp(50), size_hint_y=None, bg_color=(0.6,0.6,0.1,1)))
-        l.add_widget(ModernButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'home'), bg_color=(0.3,0.3,0.3,1))); self.sc_ref["email"].add_widget(l); self.update_stats()
+        auto_card.add_widget(self.cb_auto)
+        auto_card.add_widget(Label(text="AUTOMATYCZNA WYSYŁKA", bold=True))
+        body.add_widget(auto_card)
+
+        self.lbl_stats = Label(text="Baza: 0", size_hint_y=None, height=dp(34)); body.add_widget(self.lbl_stats)
+        self.pb_label = Label(text="Gotowy", size_hint_y=None, height=dp(28)); self.pb = ProgressBar(max=100, size_hint_y=None, height=dp(24)); body.add_widget(self.pb_label); body.add_widget(self.pb)
+
+        actions = AppActionBar()
+        actions.add_action(DangerButton(text="Wyczyść załączniki", on_press=self.clear_all_attachments, size_hint_x=None))
+        actions.add_action(PrimaryButton(text="Edytuj szablon", on_press=lambda x: setattr(self.sm, 'current', 'tmpl'), size_hint_x=None))
+        actions.add_action(PrimaryButton(text="Dodaj załącznik", on_press=lambda x: self.open_picker("attachment"), size_hint_x=None))
+        actions.add_action(PrimaryButton(text="Wyślij jeden plik", on_press=self.start_special_send_flow, size_hint_x=None))
+        actions.add_action(PrimaryButton(text="Start masowa wysyłka", on_press=self.start_mass_mailing, size_hint_x=None))
+        actions.add_action(SecondaryButton(text="Pauza/Resume", on_press=self.toggle_pause_mailing, size_hint_x=None))
+
+        body.add_widget(actions)
+        shell.set_content(body)
+        self.sc_ref["email"].add_widget(shell)
+        self.update_stats()
 
     def on_auto_checkbox_changed(self, instance, value):
         self.auto_send_mode = bool(value)
@@ -2416,15 +2435,34 @@ class FutureApp(App):
 
     def setup_smtp_ui(self):
         self.sc_ref["smtp"].clear_widgets()
-        l = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(8)); p = Path(self.user_data_dir)/"smtp.json"; d = json.load(open(p)) if p.exists() else {}
-        self.ti_h, self.ti_pt = ModernInput(hint_text="Host", text=d.get('h','')), ModernInput(hint_text="Port", text=str(d.get('port','587')))
-        self.ti_u, self.ti_p = ModernInput(hint_text="Email/Login", text=d.get('u','')), ModernInput(hint_text="Hasło/Klucz", password=True, text=d.get('p',''))
-        l.add_widget(Label(text="USTAWIENIA POCZTY", bold=True)); l.add_widget(self.ti_h); l.add_widget(self.ti_pt); l.add_widget(self.ti_u); l.add_widget(self.ti_p)
-        bx = BoxLayout(size_hint_y=None, height=dp(45)); self.cb_b = CheckBox(size_hint_x=None, width=dp(45), active=d.get('batch', True)); bx.add_widget(self.cb_b); bx.add_widget(Label(text="Batching (przerwa 60s/30 maili)")); l.add_widget(bx)
-        l.add_widget(ModernButton(text="ZAPISZ KONFIGURACJĘ", on_press=lambda x: [json.dump({'h':self.ti_h.text,'port':self.ti_pt.text,'u':self.ti_u.text,'p':self.ti_p.text,'batch':self.cb_b.active}, open(p,"w")), self.msg("OK","Zapisano")]))
-        l.add_widget(ModernButton(text="TEST POŁĄCZENIA", on_press=lambda x: self.test_smtp_direct(), bg_color=(.1,.7,.4,1)))
-        l.add_widget(ModernButton(text="POKAŻ LOGI", on_press=self.show_logs))
-        l.add_widget(ModernButton(text="POWRÓT", on_press=lambda x: setattr(self.sm,'current','home'), bg_color=(.3,.3,.3,1))); self.sc_ref["smtp"].add_widget(l)
+        p = Path(self.user_data_dir)/"smtp.json"
+        d = json.load(open(p)) if p.exists() else {}
+
+        shell = AppLayout(title="Ustawienia SMTP")
+        shell.nav_tabs.add_action(SecondaryButton(text="Wróć", on_press=lambda x: setattr(self.sm,'current','home')))
+
+        form = BoxLayout(orientation="vertical", spacing=dp(10))
+        self.ti_h = ModernInput(hint_text="Host", text=d.get('h',''))
+        self.ti_pt = ModernInput(hint_text="Port", text=str(d.get('port','587')))
+        self.ti_u = ModernInput(hint_text="Email/Login", text=d.get('u',''))
+        self.ti_p = ModernInput(hint_text="Hasło/Klucz", password=True, text=d.get('p',''))
+        form.add_widget(self.ti_h); form.add_widget(self.ti_pt); form.add_widget(self.ti_u); form.add_widget(self.ti_p)
+
+        bx = Card(orientation="horizontal", size_hint_y=None, height=dp(52), spacing=dp(10))
+        self.cb_b = CheckBox(size_hint_x=None, width=dp(45), active=d.get('batch', True))
+        bx.add_widget(self.cb_b); bx.add_widget(Label(text="Batching (przerwa 60s/30 maili)"))
+        form.add_widget(bx)
+
+        actions = AppActionBar()
+        actions.add_action(PrimaryButton(text="Zapisz", on_press=lambda x: [json.dump({'h':self.ti_h.text,'port':self.ti_pt.text,'u':self.ti_u.text,'p':self.ti_p.text,'batch':self.cb_b.active}, open(p,"w")), self.msg("OK","Zapisano")], size_hint_x=None))
+        actions.add_action(PrimaryButton(text="Test połączenia", on_press=lambda x: self.test_smtp_direct(), size_hint_x=None))
+        actions.add_action(SecondaryButton(text="Pokaż logi", on_press=self.show_logs, size_hint_x=None))
+
+        body = BoxLayout(orientation="vertical", spacing=dp(10))
+        body.add_widget(form)
+        body.add_widget(actions)
+        shell.set_content(body)
+        self.sc_ref["smtp"].add_widget(shell)
 
     def test_smtp_direct(self):
         try: s = self.connect_smtp({'h':self.ti_h.text,'port':self.ti_pt.text,'u':self.ti_u.text,'p':self.ti_p.text}); s.quit(); self.msg("OK", "Serwer SMTP Działa!"); self.log("SMTP test succeeded")
@@ -2499,12 +2537,27 @@ class FutureApp(App):
 
     def setup_tmpl_ui(self):
         self.sc_ref["tmpl"].clear_widgets()
-        l, ti_s, ti_b = BoxLayout(orientation="vertical", padding=dp(25), spacing=dp(10)), ModernInput(hint_text="Temat {Imię}"), ModernInput(hint_text="Treść...", multiline=True)
-        ts, tb = self.conn.execute("SELECT val FROM settings WHERE key='t_sub'").fetchone(), self.conn.execute("SELECT val FROM settings WHERE key='t_body'").fetchone()
+        ts = self.conn.execute("SELECT val FROM settings WHERE key='t_sub'").fetchone()
+        tb = self.conn.execute("SELECT val FROM settings WHERE key='t_body'").fetchone()
+
+        shell = AppLayout(title="Szablon email")
+        shell.nav_tabs.add_action(SecondaryButton(text="Wróć", on_press=lambda x: setattr(self.sm, 'current', 'email')))
+
+        form = BoxLayout(orientation="vertical", spacing=dp(10))
+        ti_s = ModernInput(hint_text="Temat {Imię}")
+        ti_b = ModernInput(hint_text="Treść...", multiline=True)
         ti_s.text, ti_b.text = (ts[0] if ts else ""), (tb[0] if tb else "")
-        l.add_widget(Label(text="SZABLON EMAIL", bold=True)); l.add_widget(ti_s); l.add_widget(ti_b)
-        l.add_widget(ModernButton(text="ZAPISZ", on_press=lambda x: [self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_sub',ti_s.text)), self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_body',ti_b.text)), self.conn.commit(), self.msg("OK","Wzór zapisany")]))
-        l.add_widget(ModernButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'email'))); self.sc_ref["tmpl"].add_widget(l)
+        form.add_widget(ti_s)
+        form.add_widget(ti_b)
+
+        actions = AppActionBar()
+        actions.add_action(PrimaryButton(text="Zapisz", on_press=lambda x: [self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_sub',ti_s.text)), self.conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('t_body',ti_b.text)), self.conn.commit(), self.msg("OK","Wzór zapisany")], size_hint_x=None))
+
+        body = BoxLayout(orientation="vertical", spacing=dp(10))
+        body.add_widget(form)
+        body.add_widget(actions)
+        shell.set_content(body)
+        self.sc_ref["tmpl"].add_widget(shell)
 
     def setup_contacts_ui(self):
         self.sc_ref["contacts"].clear_widgets()
@@ -2626,15 +2679,24 @@ class FutureApp(App):
 
     def setup_report_ui(self):
         self.sc_ref["report"].clear_widgets()
-        l, self.r_grid = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10)), GridLayout(cols=1, size_hint_y=None, spacing=dp(10))
-        self.r_grid.bind(minimum_height=self.r_grid.setter('height')); sc = ScrollView(); sc.add_widget(self.r_grid); l.add_widget(Label(text="HISTORIA SESJI", bold=True, height=dp(40), size_hint_y=None)); l.add_widget(sc); l.add_widget(ModernButton(text="POWRÓT", on_press=lambda x: setattr(self.sm, 'current', 'home'), height=dp(55), size_hint_y=None)); self.sc_ref["report"].add_widget(l)
+        shell = AppLayout(title="Historia sesji")
+        shell.nav_tabs.add_action(SecondaryButton(text="Wróć", on_press=lambda x: setattr(self.sm, 'current', 'home')))
+
+        self.r_grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(10), padding=[dp(2), dp(2)])
+        self.r_grid.bind(minimum_height=self.r_grid.setter('height'))
+        sc = ScrollView(); sc.add_widget(self.r_grid)
+
+        shell.set_content(sc)
+        self.sc_ref["report"].add_widget(shell)
 
     def refresh_reports(self, *a):
         self.r_grid.clear_widgets(); rows = self.conn.execute("SELECT date, ok, fail, skip, details FROM reports ORDER BY id DESC").fetchall()
         for d, ok, fl, sk, det in rows:
-            row = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(110), padding=dp(10))
-            with row.canvas.before: Color(0.15, 0.2, 0.25, 1); Rectangle(pos=row.pos, size=row.size)
-            row.add_widget(Label(text=f"Sesja: {d}", bold=True, color=COLOR_PRIMARY)); row.add_widget(Button(text="Pokaż logi", size_hint_y=None, height=dp(35), on_press=lambda x, t=det: self.show_details(t))); self.r_grid.add_widget(row)
+            row = Card(orientation="vertical", size_hint_y=None, height=dp(120), padding=dp(10), spacing=dp(8))
+            row.add_widget(Label(text=f"Sesja: {d}", bold=True, color=COLOR_PRIMARY))
+            row.add_widget(Label(text=f"OK: {ok}  BŁĘDY: {fl}  POMINIĘTE: {sk}", color=(0.8,0.85,0.92,1), size_hint_y=None, height=dp(26)))
+            row.add_widget(PrimaryButton(text="Pokaż logi", size_hint_y=None, height=dp(42), on_press=lambda x, t=det: self.show_details(t)))
+            self.r_grid.add_widget(row)
 
     def show_details(self, t):
         b = BoxLayout(orientation="vertical", padding=dp(10)); ti = TextInput(text=str(t), readonly=True, font_size='11sp'); b.add_widget(ti); b.add_widget(Button(text="ZAMKNIJ", size_hint_y=0.2, on_press=lambda x: p.dismiss())); p = Popup(title="Logi", content=b, size_hint=(.9,.8)); p.open()
