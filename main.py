@@ -2001,9 +2001,9 @@ class FutureApp(App):
             lbl = Label(text=f"{worker} - {item} {size or '-'} x{qty} {'(wydane)' if issued else ''}", halign='left', valign='middle')
             lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(12), None)))
             row.add_widget(lbl)
-            btns = BoxLayout(size_hint_x=None, width=dp(128), orientation='vertical', spacing=dp(6))
-            btns.add_widget(ModernButton(text="Usuń", bg_color=(0.7,0.1,0.1,1), size_hint_y=None, height=dp(38), on_press=lambda x, cid=cid: self._remove_order_item_and_refresh(cid, order_id, p)))
-            btns.add_widget(ModernButton(text="Wydaj", size_hint_y=None, height=dp(38), on_press=lambda x, cid=cid: self._issue_order_item_and_refresh(cid, order_id, p)))
+            btns = BoxLayout(size_hint_x=None, width=dp(236), spacing=dp(8))
+            btns.add_widget(ModernButton(text="Usuń", bg_color=(0.7,0.1,0.1,1), size_hint_x=None, width=dp(112), on_press=lambda x, cid=cid: self._remove_order_item_and_refresh(cid, order_id, p)))
+            btns.add_widget(ModernButton(text="Wydaj", size_hint_x=None, width=dp(112), on_press=lambda x, cid=cid: self._issue_order_item_and_refresh(cid, order_id, p)))
             row.add_widget(btns)
             grid.add_widget(row)
         scroll = ScrollView()
@@ -2710,13 +2710,13 @@ class FutureApp(App):
             card = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(250), padding=dp(10), spacing=dp(8))
             with card.canvas.before:
                 Color(*COLOR_CARD)
-                rect = RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
-            card.bind(pos=lambda inst, val, r=rect: setattr(r, 'pos', val), size=lambda inst, val, r=rect: setattr(r, 'size', val))
-
-            name_lbl = Label(text=f"{d[0]} {d[1]}".title(), bold=True, halign="left", valign='middle', size_hint_y=None, height=dp(38))
-            name_lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(6), None)))
-            card.add_widget(name_lbl)
-
+                rect = Rectangle(pos=r.pos, size=r.size)
+            self._bind_rect(r, rect)
+            inf = BoxLayout(orientation="vertical", size_hint_x=0.58)
+            acts = BoxLayout(size_hint_x=None, width=dp(132), orientation="vertical", spacing=dp(6))
+            name_lbl = Label(text=f"{d[0]} {d[1]}".title(), bold=True, halign="left")
+            name_lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            inf.add_widget(name_lbl)
             info_text = (
                 f"E: {d[2]}\n"
                 f"PESEL: {d[3] if d[3] else '-'}\n"
