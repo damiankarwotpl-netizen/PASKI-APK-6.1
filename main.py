@@ -553,191 +553,15 @@ class ClothesReportsScreen(Screen):
         db.log(f"Generated clothes report: {path}")
 
 
-# -------------------------------------------------
-# ULTRA MODERN UI V2 (zintegrowany z kodem źródłowym)
-# -------------------------------------------------
-
-def apply_ultra_background(widget):
-    if not widget or getattr(widget, "_ultra_bg", False):
-        return
-    widget._ultra_bg = True
-    with widget.canvas.before:
-        Color(0.03, 0.05, 0.08, 1)
-        widget._bg_rect = Rectangle(pos=widget.pos, size=widget.size)
-
-    def update(*_):
-        if hasattr(widget, '_bg_rect'):
-            widget._bg_rect.pos = widget.pos
-            widget._bg_rect.size = widget.size
-
-    widget.bind(pos=update, size=update)
-    update()
-
-
-def make_glass_card(widget):
-    if getattr(widget, "_glass_card", False):
-        return
-    widget._glass_card = True
-
-    with widget.canvas.before:
-        Color(0.12, 0.16, 0.24, 0.9)
-        widget._card_rect = RoundedRectangle(pos=widget.pos, size=widget.size, radius=[dp(16)])
-
-    with widget.canvas.after:
-        Color(0, 0, 0, 0.22)
-        widget._shadow = RoundedRectangle(pos=(widget.x, widget.y - dp(3)), size=widget.size, radius=[dp(16)])
-
-    def update(*_):
-        if hasattr(widget, '_card_rect'):
-            widget._card_rect.pos = widget.pos
-            widget._card_rect.size = widget.size
-        if hasattr(widget, '_shadow'):
-            widget._shadow.pos = (widget.x, widget.y - dp(3))
-            widget._shadow.size = widget.size
-
-    widget.bind(pos=update, size=update)
-    update()
-
-
-def style_button(btn):
-    if getattr(btn, "_modern_btn", False):
-        return
-    btn._modern_btn = True
-
-    btn.background_normal = ""
-    btn.background_color = (0, 0, 0, 0)
-    btn.height = max(btn.height, dp(48))
-    btn.padding = (dp(16), dp(10))
-    btn.bold = True
-    btn.halign = 'center'
-    btn.valign = 'middle'
-
-    with btn.canvas.before:
-        Color(0.18, 0.55, 1, 1)
-        btn._btn_bg = RoundedRectangle(pos=btn.pos, size=btn.size, radius=[dp(12)])
-
-    def update(*_):
-        if hasattr(btn, '_btn_bg'):
-            btn._btn_bg.pos = btn.pos
-            btn._btn_bg.size = btn.size
-        if hasattr(btn, 'text_size'):
-            btn.text_size = (max(dp(60), btn.width - dp(16)), None)
-
-    def press(*_):
-        if hasattr(btn, '_btn_bg'):
-            Animation(duration=0.08).cancel_all(btn._btn_bg)
-            a1 = Animation(size=(btn.width * 0.97, btn.height * 0.97), duration=0.06)
-            a2 = Animation(size=(btn.width, btn.height), duration=0.08)
-            (a1 + a2).start(btn._btn_bg)
-
-    btn.bind(pos=update, size=update, on_press=press)
-    update()
-
-
-def style_input(inp):
-    if getattr(inp, "_modern_input", False):
-        return
-    inp._modern_input = True
-
-    inp.background_normal = ""
-    inp.background_active = ""
-    inp.background_color = (0, 0, 0, 0)
-
-    with inp.canvas.before:
-        Color(0.15, 0.18, 0.26, 1)
-        inp._rect = RoundedRectangle(pos=inp.pos, size=inp.size, radius=[dp(12)])
-
-    def update(*_):
-        if hasattr(inp, '_rect'):
-            inp._rect.pos = inp.pos
-            inp._rect.size = inp.size
-
-    inp.bind(pos=update, size=update)
-    update()
-
-
-def add_fab(root):
-    if not root or getattr(root, "_fab_added", False):
-        return
-    # Jeżeli layout już ma własny FAB, nie dodawaj globalnego.
-    stack = [root]
-    while stack:
-        w = stack.pop()
-        if isinstance(w, FloatingActionButton):
-            return
-        stack.extend(getattr(w, 'children', []))
-
-    root._fab_added = True
-    fab = Button(text='+', size_hint=(None, None), size=(dp(60), dp(60)), pos_hint={"right": 0.97, "y": 0.02}, font_size='26sp')
-    fab.background_normal = ""
-    fab.background_color = (0, 0, 0, 0)
-    with fab.canvas.before:
-        Color(0.2, 0.6, 1, 1)
-        fab._circle = RoundedRectangle(pos=fab.pos, size=fab.size, radius=[dp(30)])
-
-    def update(*_):
-        if hasattr(fab, '_circle'):
-            fab._circle.pos = fab.pos
-            fab._circle.size = fab.size
-
-    fab.bind(pos=update, size=update)
-    update()
-
-    try:
-        root.add_widget(fab)
-    except Exception:
-        pass
-
-
-def fix_label(lbl):
-    try:
-        lbl.text_size = (max(dp(30), lbl.width - dp(10)), None)
-        lbl.valign = 'middle'
-    except Exception:
-        pass
-
-
-def scan_ui(widget):
-    try:
-        if isinstance(widget, Button):
-            style_button(widget)
-
-        if isinstance(widget, TextInput):
-            style_input(widget)
-
-        if isinstance(widget, Label):
-            fix_label(widget)
-
-        if isinstance(widget, BoxLayout):
-            # Delikatne nakładanie glass-card tylko na rekordowe wiersze/karty.
-            if widget.size_hint_y is None and widget.height >= dp(90) and not isinstance(widget, (ButtonContainer, AppActionBar, TopBar)):
-                make_glass_card(widget)
-
-    except Exception:
-        pass
-
-    for child in getattr(widget, 'children', []):
-        scan_ui(child)
-
-
 class ProUIStyler:
-    """Globalny styler: integruje Ultra UI V2 bez zmian logiki biznesowej."""
+    """Pozostawione dla kompatybilności; brak inwazyjnych modyfikacji runtime UI."""
 
     def __init__(self):
         self._scan_event = None
 
     def start(self, root_widget):
-        if not root_widget:
-            return
-        self.apply(root_widget)
-        if self._scan_event is not None:
-            self._scan_event.cancel()
-        self._scan_event = Clock.schedule_interval(lambda dt: self.apply(root_widget), 1.0)
+        return
 
-    def apply(self, root_widget):
-        apply_ultra_background(root_widget)
-        scan_ui(root_widget)
-        add_fab(root_widget)
 
 
 class FutureApp(App):
@@ -781,8 +605,6 @@ class FutureApp(App):
             self._build_fallback_home()
 
         self._setup_back_navigation()
-        self._pro_ui_styler = ProUIStyler()
-        Clock.schedule_once(lambda dt: self._pro_ui_styler.start(self.sm), 0.15)
         return self.sm
 
     def _setup_back_navigation(self):
@@ -3003,35 +2825,6 @@ class FutureApp(App):
         except Exception:
             self.msg("Błąd", "Nie udało się otworzyć WhatsApp")
 
-    def contact_quick_actions(self, phone, name, surname):
-        # Vertical button container keeps actions readable and scrollable on small phones.
-        box = ButtonContainer(orientation='vertical', size_hint_x=None, width=dp(162), size_hint_y=None, height=dp(198), min_button_width=dp(146), min_button_height=dp(44))
-        phone_txt = str(phone).strip() if phone else ""
-
-        def copy_phone(_):
-            if not phone_txt:
-                return self.msg("Info", "Kontakt nie ma telefonu")
-            try:
-                from kivy.core.clipboard import Clipboard
-                Clipboard.copy(phone_txt)
-                self.msg("OK", f"Skopiowano numer: {phone_txt}")
-            except Exception:
-                self.msg("Błąd", "Nie udało się skopiować numeru")
-
-        def copy_full_name(_):
-            full_name = f"{str(name).title()} {str(surname).title()}"
-            try:
-                from kivy.core.clipboard import Clipboard
-                Clipboard.copy(full_name)
-                self.msg("OK", f"Skopiowano: {full_name}")
-            except Exception:
-                self.msg("Błąd", "Nie udało się skopiować danych")
-
-        box.add_action(ModernButton(text="Zadzwoń", on_press=lambda x: self._call_contact(phone_txt), bg_color=(0.16,0.6,0.3,1)))
-        box.add_action(ModernButton(text="WhatsApp", on_press=lambda x: self._whatsapp_contact(phone_txt, name), bg_color=(0.06,0.55,0.25,1)))
-        box.add_action(ModernButton(text="Kopiuj tel", on_press=copy_phone))
-        box.add_action(ModernButton(text="Kopiuj dane", on_press=copy_full_name, bg_color=(0.21,0.43,0.72,1)))
-        return box
 
     def clear_all_attachments(self, _):
         [self.global_attachments.clear(), self.update_stats(), self.log("Cleared attachments")]
