@@ -90,12 +90,17 @@ class ModernButton(Button):
         state_handler = getattr(self, '_update_state', None)
         if not callable(state_handler):
             state_handler = self._fallback_update_state
+        self.halign = 'center'
+        self.valign = 'middle'
+        self.shorten = False
         self.bind(pos=self._update, size=self._update, state=state_handler)
         state_handler()
+        self._update()
 
     def _update(self, *args):
         self.rect.pos, self.rect.size = self.pos, self.size
         self.border_line.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(12))
+        self.text_size = (max(dp(10), self.width - dp(12)), max(dp(10), self.height - dp(8)))
 
     def _fallback_update_state(self, *args):
         factor = 0.82 if self.state == 'down' else 1.0
@@ -307,8 +312,7 @@ class ClothesReportsScreen(Screen):
         root = BoxLayout(orientation='vertical', padding=dp(6), spacing=dp(6))
         header = BoxLayout(size_hint_y=None, height=dp(50))
         header.add_widget(Label(text="Raporty wydanych ubrań", bold=True))
-        header.add_widget(ModernButton(text="Generuj PDF", size_hint_x=None, width=dp(160), on_press=lambda x: self.generate()))
-        header.add_widget(ModernButton(text="Export CSV", size_hint_x=None, width=dp(140), on_press=lambda x: App.get_running_app().export_clothes_history_csv()))
+        header.add_widget(ModernButton(text="Export CSV", size_hint_x=None, width=dp(180), on_press=lambda x: App.get_running_app().export_clothes_history_csv()))
         root.add_widget(header)
         self.add_widget(root)
         self.built = True
@@ -1369,11 +1373,7 @@ class FutureApp(App):
         search_ti.bind(text=refresh_filter)
         plant_ti.bind(text=refresh_filter)
 
-        row1 = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(6))
-        row1.add_widget(ModernButton(text='Wszyscy widoczni', on_press=select_all_visible, font_size='16sp'))
-        row1.add_widget(ModernButton(text='Wszyscy z zakładu', on_press=select_plant, font_size='16sp'))
-        root.add_widget(row1)
-        root.add_widget(ModernButton(text='Dalej', on_press=next_step, bg_color=(0.16,0.56,0.33,1), size_hint_y=None, height=dp(50), font_size='18sp'))
+        root.add_widget(ModernButton(text='Zapisz zamówienie', on_press=next_step, bg_color=(0.16,0.56,0.33,1), size_hint_y=None, height=dp(50), font_size='18sp'))
 
         p = Popup(title='Nowe zamówienie - wybór pracowników', content=root, size_hint=(0.95,0.95))
         p.open()
@@ -1444,10 +1444,7 @@ class FutureApp(App):
                 pass
             self.msg('OK', f"Zamówienie #{order_id} zapisane")
 
-        row_btn = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(6))
-        row_btn.add_widget(ModernButton(text='Zamów wszystko', on_press=order_all, font_size='16sp'))
-        row_btn.add_widget(ModernButton(text='Zapisz zamówienie', on_press=save_order, bg_color=(0.16,0.56,0.33,1), font_size='16sp'))
-        root.add_widget(row_btn)
+        root.add_widget(ModernButton(text='Zapisz zamówienie', on_press=save_order, bg_color=(0.16,0.56,0.33,1), size_hint_y=None, height=dp(52), font_size='16sp'))
 
         p = Popup(title='Nowe zamówienie - pozycje i ilości', content=root, size_hint=(0.97,0.97))
         p.open()
