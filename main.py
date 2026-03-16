@@ -31,6 +31,7 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.checkbox import CheckBox
 from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
 from kivy.uix.progressbar import ProgressBar
+from kivy.animation import Animation
 from kivy.graphics import Color, Rectangle, RoundedRectangle, Line
 
 try:
@@ -552,8 +553,175 @@ class ClothesReportsScreen(Screen):
         db.log(f"Generated clothes report: {path}")
 
 
+# -------------------------------------------------
+# ULTRA MODERN UI V2 (zintegrowany z kodem źródłowym)
+# -------------------------------------------------
+
+def apply_ultra_background(widget):
+    if not widget or getattr(widget, "_ultra_bg", False):
+        return
+    widget._ultra_bg = True
+    with widget.canvas.before:
+        Color(0.03, 0.05, 0.08, 1)
+        widget._bg_rect = Rectangle(pos=widget.pos, size=widget.size)
+
+    def update(*_):
+        if hasattr(widget, '_bg_rect'):
+            widget._bg_rect.pos = widget.pos
+            widget._bg_rect.size = widget.size
+
+    widget.bind(pos=update, size=update)
+    update()
+
+
+def make_glass_card(widget):
+    if getattr(widget, "_glass_card", False):
+        return
+    widget._glass_card = True
+
+    with widget.canvas.before:
+        Color(0.12, 0.16, 0.24, 0.9)
+        widget._card_rect = RoundedRectangle(pos=widget.pos, size=widget.size, radius=[dp(16)])
+
+    with widget.canvas.after:
+        Color(0, 0, 0, 0.22)
+        widget._shadow = RoundedRectangle(pos=(widget.x, widget.y - dp(3)), size=widget.size, radius=[dp(16)])
+
+    def update(*_):
+        if hasattr(widget, '_card_rect'):
+            widget._card_rect.pos = widget.pos
+            widget._card_rect.size = widget.size
+        if hasattr(widget, '_shadow'):
+            widget._shadow.pos = (widget.x, widget.y - dp(3))
+            widget._shadow.size = widget.size
+
+    widget.bind(pos=update, size=update)
+    update()
+
+
+def style_button(btn):
+    if getattr(btn, "_modern_btn", False):
+        return
+    btn._modern_btn = True
+
+    btn.background_normal = ""
+    btn.background_color = (0, 0, 0, 0)
+    btn.height = max(btn.height, dp(48))
+    btn.padding = (dp(16), dp(10))
+    btn.bold = True
+    btn.halign = 'center'
+    btn.valign = 'middle'
+
+    with btn.canvas.before:
+        Color(0.18, 0.55, 1, 1)
+        btn._btn_bg = RoundedRectangle(pos=btn.pos, size=btn.size, radius=[dp(12)])
+
+    def update(*_):
+        if hasattr(btn, '_btn_bg'):
+            btn._btn_bg.pos = btn.pos
+            btn._btn_bg.size = btn.size
+        if hasattr(btn, 'text_size'):
+            btn.text_size = (max(dp(60), btn.width - dp(16)), None)
+
+    def press(*_):
+        if hasattr(btn, '_btn_bg'):
+            Animation(duration=0.08).cancel_all(btn._btn_bg)
+            a1 = Animation(size=(btn.width * 0.97, btn.height * 0.97), duration=0.06)
+            a2 = Animation(size=(btn.width, btn.height), duration=0.08)
+            (a1 + a2).start(btn._btn_bg)
+
+    btn.bind(pos=update, size=update, on_press=press)
+    update()
+
+
+def style_input(inp):
+    if getattr(inp, "_modern_input", False):
+        return
+    inp._modern_input = True
+
+    inp.background_normal = ""
+    inp.background_active = ""
+    inp.background_color = (0, 0, 0, 0)
+
+    with inp.canvas.before:
+        Color(0.15, 0.18, 0.26, 1)
+        inp._rect = RoundedRectangle(pos=inp.pos, size=inp.size, radius=[dp(12)])
+
+    def update(*_):
+        if hasattr(inp, '_rect'):
+            inp._rect.pos = inp.pos
+            inp._rect.size = inp.size
+
+    inp.bind(pos=update, size=update)
+    update()
+
+
+def add_fab(root):
+    if not root or getattr(root, "_fab_added", False):
+        return
+    # Jeżeli layout już ma własny FAB, nie dodawaj globalnego.
+    stack = [root]
+    while stack:
+        w = stack.pop()
+        if isinstance(w, FloatingActionButton):
+            return
+        stack.extend(getattr(w, 'children', []))
+
+    root._fab_added = True
+    fab = Button(text='+', size_hint=(None, None), size=(dp(60), dp(60)), pos_hint={"right": 0.97, "y": 0.02}, font_size='26sp')
+    fab.background_normal = ""
+    fab.background_color = (0, 0, 0, 0)
+    with fab.canvas.before:
+        Color(0.2, 0.6, 1, 1)
+        fab._circle = RoundedRectangle(pos=fab.pos, size=fab.size, radius=[dp(30)])
+
+    def update(*_):
+        if hasattr(fab, '_circle'):
+            fab._circle.pos = fab.pos
+            fab._circle.size = fab.size
+
+    fab.bind(pos=update, size=update)
+    update()
+
+    try:
+        root.add_widget(fab)
+    except Exception:
+        pass
+
+
+def fix_label(lbl):
+    try:
+        lbl.text_size = (max(dp(30), lbl.width - dp(10)), None)
+        lbl.valign = 'middle'
+    except Exception:
+        pass
+
+
+def scan_ui(widget):
+    try:
+        if isinstance(widget, Button):
+            style_button(widget)
+
+        if isinstance(widget, TextInput):
+            style_input(widget)
+
+        if isinstance(widget, Label):
+            fix_label(widget)
+
+        if isinstance(widget, BoxLayout):
+            # Delikatne nakładanie glass-card tylko na rekordowe wiersze/karty.
+            if widget.size_hint_y is None and widget.height >= dp(90) and not isinstance(widget, (ButtonContainer, AppActionBar, TopBar)):
+                make_glass_card(widget)
+
+    except Exception:
+        pass
+
+    for child in getattr(widget, 'children', []):
+        scan_ui(child)
+
+
 class ProUIStyler:
-    """Globalny styler: ujednolica UI całej aplikacji bez zmiany logiki."""
+    """Globalny styler: integruje Ultra UI V2 bez zmian logiki biznesowej."""
 
     def __init__(self):
         self._scan_event = None
@@ -564,101 +732,12 @@ class ProUIStyler:
         self.apply(root_widget)
         if self._scan_event is not None:
             self._scan_event.cancel()
-        # regularny rescan dla dynamicznie tworzonych widgetów
-        self._scan_event = Clock.schedule_interval(lambda dt: self.apply(root_widget), 0.9)
+        self._scan_event = Clock.schedule_interval(lambda dt: self.apply(root_widget), 1.0)
 
-    def apply(self, widget):
-        try:
-            self._style_widget(widget)
-        except Exception:
-            pass
-        for child in getattr(widget, "children", []):
-            self.apply(child)
-
-    def _style_widget(self, widget):
-        if isinstance(widget, Label):
-            self._style_label(widget)
-            return
-
-        if isinstance(widget, Button):
-            self._style_button(widget)
-            return
-
-        if isinstance(widget, TextInput):
-            self._style_input(widget)
-            return
-
-        if isinstance(widget, ScrollView):
-            self._style_scroll(widget)
-            return
-
-    def _style_label(self, lbl):
-        if not getattr(lbl, '_pro_label_applied', False):
-            lbl._pro_label_applied = True
-            if getattr(lbl, 'halign', '') in ('', None):
-                lbl.halign = 'left'
-            lbl.valign = 'middle'
-
-            def _update_text_size(*_):
-                lbl.text_size = (max(dp(30), lbl.width - dp(8)), None)
-
-            lbl.bind(size=_update_text_size)
-            _update_text_size()
-
-        # drobne odświeżanie czytelności
-        try:
-            if hasattr(lbl, 'font_size') and float(lbl.font_size) < float(dp(12)):
-                lbl.font_size = dp(12)
-        except Exception:
-            pass
-
-    def _style_button(self, btn):
-        if not getattr(btn, '_pro_btn_applied', False):
-            btn._pro_btn_applied = True
-            btn.height = max(btn.height, dp(48))
-            btn.padding = (dp(14), dp(10))
-            btn.halign = 'center'
-            btn.valign = 'middle'
-
-            def _update_btn_text(*_):
-                btn.text_size = (max(dp(60), btn.width - dp(18)), None)
-
-            if hasattr(btn, 'text_size'):
-                btn.bind(size=_update_btn_text)
-                _update_btn_text()
-
-        if btn.size_hint_x is None:
-            btn.width = max(btn.width, dp(132))
-
-    def _style_input(self, ti):
-        if getattr(ti, '_pro_input_applied', False):
-            return
-        ti._pro_input_applied = True
-        ti.padding = [dp(12), dp(12)]
-        ti.cursor_width = max(1, int(dp(2)))
-        try:
-            if float(ti.font_size) < float(dp(14)):
-                ti.font_size = dp(14)
-        except Exception:
-            pass
-
-    def _style_boxlayout(self, box):
-        return
-
-    def _style_grid(self, grid):
-        return
-
-    def _style_scroll(self, sv):
-        if getattr(sv, '_pro_scroll_applied', False):
-            return
-        sv._pro_scroll_applied = True
-        try:
-            sv.bar_width = max(float(getattr(sv, 'bar_width', dp(6))), float(dp(6)))
-        except Exception:
-            pass
-
-    def _style_popup(self, pop):
-        return
+    def apply(self, root_widget):
+        apply_ultra_background(root_widget)
+        scan_ui(root_widget)
+        add_fab(root_widget)
 
 
 class FutureApp(App):
