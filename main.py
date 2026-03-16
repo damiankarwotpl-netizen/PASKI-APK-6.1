@@ -852,16 +852,17 @@ class FutureApp(App):
     def clothes_issue_all(self,order_id):
         cur=self.conn.cursor()
         rows=cur.execute("""
-        SELECT id, worker_id, item, qty
-        FROM clothes_order_items
-        WHERE order_id=?
+        SELECT coi.id, coi.worker_id, COALESCE(w.name, coi.name, ''), COALESCE(w.surname, coi.surname, ''), coi.item, COALESCE(coi.size, ''), COALESCE(coi.qty, 1)
+        FROM clothes_order_items coi
+        LEFT JOIN workers w ON w.id=coi.worker_id
+        WHERE coi.order_id=?
         """,(order_id,)).fetchall()
         for r in rows:
-            coi_id, wid, item, qty = r
+            _coi_id, wid, name, surname, item, size, _qty = r
             cur.execute("""
             INSERT INTO clothes_history(worker_id, name, surname, item, size, date)
-            VALUES(?,?,?,?,?)
-            """,(wid, "", "", item, datetime.now().strftime("%Y-%m-%d")))
+            VALUES(?,?,?,?,?,?)
+            """,(wid, name, surname, item, size, datetime.now().strftime("%Y-%m-%d")))
         cur.execute("DELETE FROM clothes_order_items WHERE order_id=?", (order_id,))
         cur.execute("UPDATE clothes_orders SET status='wydane' WHERE id=?", (order_id,))
         self.conn.commit()
@@ -897,10 +898,11 @@ class FutureApp(App):
             for cid,cb in items:
                 if cb.active:
                     cur.execute("""
-                    INSERT INTO clothes_history(worker_id, item, date)
-                    SELECT worker_id, item, ?
-                    FROM clothes_order_items
-                    WHERE id=?
+                    INSERT INTO clothes_history(worker_id, name, surname, item, size, date)
+                    SELECT coi.worker_id, COALESCE(w.name, coi.name, ''), COALESCE(w.surname, coi.surname, ''), coi.item, COALESCE(coi.size, ''), ?
+                    FROM clothes_order_items coi
+                    LEFT JOIN workers w ON w.id=coi.worker_id
+                    WHERE coi.id=?
                     """,(datetime.now().strftime("%Y-%m-%d"),cid))
                     cur.execute("DELETE FROM clothes_order_items WHERE id=?", (cid,))
             self.conn.commit()
@@ -1259,14 +1261,21 @@ class FutureApp(App):
 
         root = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
         root.add_widget(Label(text='Nowe zamówienie odzieży', bold=True, size_hint_y=None, height=dp(36)))
-        plant_ti = ModernInput(hint_text='Zakład (filtr / opis zamówienia)')
-        search_ti = ModernInput(hint_text='Szukaj pracownika...')
-        root.add_widget(plant_ti)
-        root.add_widget(search_ti)
+
+        def labeled_input(title, hint):
+            wrap = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(82), spacing=dp(2))
+            wrap.add_widget(Label(text=title, halign='left', size_hint_y=None, height=dp(20), color=(0.82,0.86,0.93,1)))
+            ti = ModernInput(hint_text=hint, size_hint_y=None, height=dp(58))
+            wrap.add_widget(ti)
+            return wrap, ti
+
+        plant_wrap, plant_ti = labeled_input('Zakład zamówienia', 'Zakład (filtr / opis zamówienia)')
+        search_wrap, search_ti = labeled_input('Wyszukiwarka pracownika', 'Szukaj pracownika...')
+        root.add_widget(plant_wrap)
+        root.add_widget(search_wrap)
 
         workers_grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(4))
         workers_grid.bind(minimum_height=workers_grid.setter('height'))
-        selected = {}
         rows_ui = []
 
         def add_worker_row(w):
@@ -1286,8 +1295,6 @@ class FutureApp(App):
         sc.add_widget(workers_grid)
         root.add_widget(sc)
 
-        btns = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(6))
-
         def refresh_filter(*_):
             workers_grid.clear_widgets()
             q = search_ti.text.lower().strip()
@@ -1302,7 +1309,7 @@ class FutureApp(App):
 
         def select_all_visible(_):
             visible = set(workers_grid.children)
-            for w, row, cb in rows_ui:
+            for _w, row, cb in rows_ui:
                 if row in visible:
                     cb.active = True
 
@@ -1310,11 +1317,11 @@ class FutureApp(App):
             ptxt = plant_ti.text.lower().strip()
             if not ptxt:
                 return self.msg('Info', 'Podaj zakład, aby zaznaczyć wszystkich z zakładu')
-            for w, row, cb in rows_ui:
+            for w, _row, cb in rows_ui:
                 cb.active = ptxt in (w['plant'] or '').lower()
 
         def next_step(_):
-            chosen = [w for w, row, cb in rows_ui if cb.active]
+            chosen = [w for w, _row, cb in rows_ui if cb.active]
             if not chosen:
                 return self.msg('Błąd', 'Wybierz co najmniej jednego pracownika')
             p.dismiss()
@@ -1323,10 +1330,11 @@ class FutureApp(App):
         search_ti.bind(text=refresh_filter)
         plant_ti.bind(text=refresh_filter)
 
-        btns.add_widget(ModernButton(text='Wszyscy widoczni', on_press=select_all_visible))
-        btns.add_widget(ModernButton(text='Wszyscy z zakładu', on_press=select_plant))
-        btns.add_widget(ModernButton(text='Dalej', on_press=next_step, bg_color=(0.16,0.56,0.33,1)))
-        root.add_widget(btns)
+        row1 = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(6))
+        row1.add_widget(ModernButton(text='Wszyscy widoczni', on_press=select_all_visible, font_size='16sp'))
+        row1.add_widget(ModernButton(text='Wszyscy z zakładu', on_press=select_plant, font_size='16sp'))
+        root.add_widget(row1)
+        root.add_widget(ModernButton(text='Dalej', on_press=next_step, bg_color=(0.16,0.56,0.33,1), size_hint_y=None, height=dp(50), font_size='18sp'))
 
         p = Popup(title='Nowe zamówienie - wybór pracowników', content=root, size_hint=(0.95,0.95))
         p.open()
@@ -1340,7 +1348,7 @@ class FutureApp(App):
         worker_forms = {}
 
         for w in selected_workers:
-            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(210), padding=dp(8), spacing=dp(6))
+            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(320), padding=dp(8), spacing=dp(6))
             with card.canvas.before:
                 Color(*COLOR_CARD)
                 rr = RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(10)])
@@ -1356,7 +1364,8 @@ class FutureApp(App):
             card.add_widget(head)
 
             qty_map = {}
-            items_grid = GridLayout(cols=3, size_hint_y=None, height=dp(150), row_default_height=dp(30), row_force_default=True)
+            items_grid = GridLayout(cols=3, size_hint_y=None, row_default_height=dp(34), row_force_default=True)
+            items_grid.height = dp(34 * 6)
             items_grid.add_widget(Label(text='Pozycja', bold=True))
             items_grid.add_widget(Label(text='Rozmiar', bold=True))
             items_grid.add_widget(Label(text='Ilość', bold=True))
@@ -1374,8 +1383,6 @@ class FutureApp(App):
         sc = ScrollView()
         sc.add_widget(grid)
         root.add_widget(sc)
-
-        bottom = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(6))
 
         def order_all(_):
             for frm in worker_forms.values():
@@ -1399,9 +1406,10 @@ class FutureApp(App):
                 pass
             self.msg('OK', f"Zamówienie #{order_id} zapisane.\nRaport hurtowni: {p1}\nRaport wydania: {p2}")
 
-        bottom.add_widget(ModernButton(text='Zamów wszystko', on_press=order_all))
-        bottom.add_widget(ModernButton(text='Zapisz i generuj Excel', on_press=save_order, bg_color=(0.16,0.56,0.33,1)))
-        root.add_widget(bottom)
+        row_btn = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(6))
+        row_btn.add_widget(ModernButton(text='Zamów wszystko', on_press=order_all, font_size='16sp'))
+        row_btn.add_widget(ModernButton(text='Zapisz i generuj Excel', on_press=save_order, bg_color=(0.16,0.56,0.33,1), font_size='16sp'))
+        root.add_widget(row_btn)
 
         p = Popup(title='Nowe zamówienie - pozycje i ilości', content=root, size_hint=(0.97,0.97))
         p.open()
@@ -1560,22 +1568,32 @@ class FutureApp(App):
 
     def form_clothes_size(self, record=None):
         box = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
-        name_ti = ModernInput(hint_text="Imię", text=(record[1] if record else ""))
-        surname_ti = ModernInput(hint_text="Nazwisko", text=(record[2] if record else ""))
-        plant_ti = ModernInput(hint_text="Zakład", text=(record[3] if record else ""))
-        shirt_ti = ModernInput(hint_text="Koszulka", text=(record[4] if record else ""))
-        hoodie_ti = ModernInput(hint_text="Bluza", text=(record[5] if record else ""))
-        pants_ti = ModernInput(hint_text="Spodnie", text=(record[6] if record else ""))
-        jacket_ti = ModernInput(hint_text="Kurtka", text=(record[7] if record else ""))
-        shoes_ti = ModernInput(hint_text="Buty", text=(record[8] if record else ""))
-        box.add_widget(name_ti)
-        box.add_widget(surname_ti)
-        box.add_widget(plant_ti)
-        box.add_widget(shirt_ti)
-        box.add_widget(hoodie_ti)
-        box.add_widget(pants_ti)
-        box.add_widget(jacket_ti)
-        box.add_widget(shoes_ti)
+
+        def labeled_field(title, hint, text_val=""):
+            wrap = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(82), spacing=dp(2))
+            wrap.add_widget(Label(text=title, halign='left', size_hint_y=None, height=dp(20), color=(0.82,0.86,0.93,1)))
+            ti = ModernInput(hint_text=hint, text=text_val, size_hint_y=None, height=dp(58))
+            wrap.add_widget(ti)
+            return wrap, ti
+
+        fields = [
+            ("Imię", "Imię", record[1] if record else ""),
+            ("Nazwisko", "Nazwisko", record[2] if record else ""),
+            ("Zakład", "Zakład", record[3] if record else ""),
+            ("Rozmiar koszulki", "Koszulka", record[4] if record else ""),
+            ("Rozmiar bluzy", "Bluza", record[5] if record else ""),
+            ("Rozmiar spodni", "Spodnie", record[6] if record else ""),
+            ("Rozmiar kurtki", "Kurtka", record[7] if record else ""),
+            ("Rozmiar butów", "Buty", record[8] if record else ""),
+        ]
+        inputs = []
+        for title, hint, txt in fields:
+            wrap, ti = labeled_field(title, hint, txt)
+            box.add_widget(wrap)
+            inputs.append(ti)
+
+        name_ti, surname_ti, plant_ti, shirt_ti, hoodie_ti, pants_ti, jacket_ti, shoes_ti = inputs
+
         def save(_):
             try:
                 if record and record[0]:
@@ -1603,8 +1621,9 @@ class FutureApp(App):
                     pass
             except Exception as e:
                 self.msg("Błąd", str(e))
-        box.add_widget(ModernButton(text="ZAPISZ", on_press=save))
-        p = Popup(title="Rozmiary pracownika", content=box, size_hint=(0.9,0.9))
+
+        box.add_widget(ModernButton(text="ZAPISZ", on_press=save, size_hint_y=None, height=dp(52)))
+        p = Popup(title="Rozmiary pracownika", content=box, size_hint=(0.92,0.95))
         p.open()
 
     def edit_clothes_size(self, record):
