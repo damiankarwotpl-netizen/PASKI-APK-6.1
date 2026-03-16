@@ -266,7 +266,7 @@ class SearchBar(BoxLayout):
         self.add_widget(self.input)
 
 
-class ActionBar(ScrollView):
+class AppActionBar(ScrollView):
     def __init__(self, **kwargs):
         super().__init__(size_hint_y=None, height=dp(62), do_scroll_y=False, **kwargs)
         self.row = BoxLayout(orientation="horizontal", size_hint_x=None, spacing=dp(8), padding=[dp(8), dp(6)])
@@ -293,9 +293,9 @@ class AppLayout(FloatLayout):
         super().__init__(**kwargs)
         self.base = BoxLayout(orientation="vertical", padding=[dp(10), dp(10), dp(10), dp(10)], spacing=dp(8), size_hint=(1, 1))
         self.topbar = TopBar(title=title)
-        self.nav_tabs = ActionBar()
+        self.nav_tabs = AppActionBar()
         self.content = BoxLayout(orientation="vertical")
-        self.action_bar = ActionBar()
+        self.action_bar = AppActionBar()
         self.base.add_widget(self.topbar)
         self.base.add_widget(self.nav_tabs)
         self.base.add_widget(self.content)
@@ -3089,7 +3089,7 @@ class FutureApp(App):
         self.lbl_stats_paski = Label(text="Baza: 0 | Załączniki: 0", size_hint_y=None, height=dp(32)); body.add_widget(self.lbl_stats_paski)
         self.pb_label_paski = Label(text="Gotowy", size_hint_y=None, height=dp(28)); self.pb_paski = ProgressBar(max=100, size_hint_y=None, height=dp(24)); body.add_widget(self.pb_label_paski); body.add_widget(self.pb_paski)
 
-        actions = ActionBar()
+        actions = AppActionBar()
         actions.add_action(PrimaryButton(text="Wczytaj arkusz płac", on_press=lambda x: self.open_picker("data"), size_hint_x=None))
         actions.add_action(PrimaryButton(text="Podgląd i eksport", on_press=lambda x: [self.refresh_table(), setattr(self.sm, 'current', 'table')] if self.full_data else self.msg("!", "Wczytaj arkusz!"), size_hint_x=None))
         actions.add_action(PrimaryButton(text="Edytuj szablon", on_press=lambda x: setattr(self.sm, 'current', 'tmpl'), size_hint_x=None))
