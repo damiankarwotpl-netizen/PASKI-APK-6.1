@@ -857,53 +857,109 @@ class FutureApp(App):
         pdf.build(elements+[Table(data)])
         self.msg("PDF","PDF wydania zapisany")
 
+    def _order_status(self, order_id):
+        row = self.conn.execute("SELECT COALESCE(status,'') FROM clothes_orders WHERE id=?", (order_id,)).fetchone()
+        return (row[0] if row else '') or ''
+
+    def _can_issue_order(self, order_id):
+        st = self._order_status(order_id).strip().lower()
+        if st != 'zamówione':
+            self.msg("Info", "Najpierw kliknij 'Zamów' (status musi być: Zamówione)")
+            return False
+        return True
+
+    def _refresh_order_issue_status(self, order_id):
+        row = self.conn.execute("""
+        SELECT
+            COALESCE(SUM(CASE WHEN COALESCE(issued,0)=1 THEN 1 ELSE 0 END), 0),
+            COUNT(*)
+        FROM clothes_order_items
+        WHERE order_id=?
+        """, (order_id,)).fetchone()
+        issued_cnt = int((row[0] if row else 0) or 0)
+        total_cnt = int((row[1] if row else 0) or 0)
+        if total_cnt <= 0:
+            return
+        if issued_cnt >= total_cnt:
+            status = 'Wydane'
+        elif issued_cnt > 0:
+            status = 'Częściowo wydane'
+        else:
+            return
+        self.conn.execute("UPDATE clothes_orders SET status=? WHERE id=?", (status, order_id))
+
     def clothes_issue_all(self,order_id):
+        if not self._can_issue_order(order_id):
+            return
         cur=self.conn.cursor()
         rows=cur.execute("""
         SELECT coi.id, coi.worker_id, COALESCE(w.name, coi.name, ''), COALESCE(w.surname, coi.surname, ''), coi.item, COALESCE(coi.size, ''), COALESCE(coi.qty, 1)
         FROM clothes_order_items coi
         LEFT JOIN workers w ON w.id=coi.worker_id
-        WHERE coi.order_id=?
+        WHERE coi.order_id=? AND COALESCE(coi.issued,0)=0
         """,(order_id,)).fetchall()
+        if not rows:
+            self.msg("Info", "Brak niewydanych pozycji")
+            return
         for r in rows:
-            _coi_id, wid, name, surname, item, size, _qty = r
+            coi_id, wid, name, surname, item, size, _qty = r
             cur.execute("""
             INSERT INTO clothes_history(worker_id, name, surname, item, size, date)
             VALUES(?,?,?,?,?,?)
             """,(wid, name, surname, item, size, datetime.now().strftime("%Y-%m-%d")))
-        cur.execute("DELETE FROM clothes_order_items WHERE order_id=?", (order_id,))
-        cur.execute("UPDATE clothes_orders SET status='wydane' WHERE id=?", (order_id,))
+            cur.execute("UPDATE clothes_order_items SET issued=1 WHERE id=?", (coi_id,))
+        self._refresh_order_issue_status(order_id)
         self.conn.commit()
         self.msg("OK","Ubrania wydane")
 
     def clothes_issue_partial(self,order_id):
+        if not self._can_issue_order(order_id):
+            return
         root=BoxLayout(orientation="vertical",padding=dp(10),spacing=dp(6))
         cur=self.conn.cursor()
         grid=GridLayout(cols=1,size_hint_y=None)
         grid.bind(minimum_height=grid.setter("height"))
         items=[]
         rows=cur.execute("""
-        SELECT c.id,w.name,w.surname,c.item,c.qty
+        SELECT c.id,
+               COALESCE(w.name, c.name, ''),
+               COALESCE(w.surname, c.surname, ''),
+               c.item,
+               COALESCE(c.size, ''),
+               COALESCE(c.qty,1),
+               COALESCE(c.issued,0)
         FROM clothes_order_items c
         LEFT JOIN workers w ON w.id=c.worker_id
         WHERE order_id=?
         """,(order_id,)).fetchall()
+        any_available = False
         for r in rows:
             cid=r[0]
-            label=f"{r[1] or ''} {r[2] or ''} - {r[3]} x{r[4] or 1}"
+            already_issued = int(r[6] or 0) == 1
+            if not already_issued:
+                any_available = True
+            label=f"{r[1] or ''} {r[2] or ''} - {r[3]} {r[4] or '-'} x{r[5] or 1}{' (wydane)' if already_issued else ''}"
             cb=CheckBox()
+            cb.disabled = already_issued
             row=BoxLayout(size_hint_y=None,height=dp(36))
             lbl = Label(text=label, halign='left', valign='middle')
             lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(12), None)))
             row.add_widget(lbl)
             row.add_widget(cb)
             grid.add_widget(row)
-            items.append((cid,cb))
+            items.append((cid,cb,already_issued))
         scroll=ScrollView(size_hint=(1,1))
         scroll.add_widget(grid)
         root.add_widget(scroll)
+
+        if not any_available:
+            root.add_widget(Label(text="Brak pozycji do wydania", size_hint_y=None, height=dp(32)))
+
         def save(_):
-            for cid,cb in items:
+            changed = 0
+            for cid,cb,already_issued in items:
+                if already_issued:
+                    continue
                 if cb.active:
                     cur.execute("""
                     INSERT INTO clothes_history(worker_id, name, surname, item, size, date)
@@ -912,11 +968,17 @@ class FutureApp(App):
                     LEFT JOIN workers w ON w.id=coi.worker_id
                     WHERE coi.id=?
                     """,(datetime.now().strftime("%Y-%m-%d"),cid))
-                    cur.execute("DELETE FROM clothes_order_items WHERE id=?", (cid,))
+                    cur.execute("UPDATE clothes_order_items SET issued=1 WHERE id=?", (cid,))
+                    changed += 1
+            if changed <= 0:
+                self.msg("Info", "Nie zaznaczono pozycji do wydania")
+                return
+            self._refresh_order_issue_status(order_id)
             self.conn.commit()
             self.msg("OK","Wydanie zapisane")
             px.dismiss()
-        root.add_widget(ModernButton(text="ZAPISZ",on_press=save))
+            self.clothes_order_details(order_id)
+        root.add_widget(ModernButton(text="WYDAJ ZAZNACZONE",on_press=save))
         px = Popup(title="WYDANIE CZĘŚCIOWE",content=root,size_hint=(0.9,0.9))
         px.open()
 
@@ -1147,7 +1209,6 @@ class FutureApp(App):
         btn_w = dp(160)
         inner.add_widget(ModernButton(text="Rozmiary", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'sizes')))
         inner.add_widget(ModernButton(text="Zamówienia", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'orders')))
-        inner.add_widget(ModernButton(text="Status", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'status')))
         inner.add_widget(ModernButton(text="Raporty", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.clothes_sm, 'current', 'reports')))
         inner.add_widget(ModernButton(text="Wróć", size_hint_x=None, width=btn_w, on_press=lambda x: setattr(self.sm, 'current', 'home')))
         hs.add_widget(inner)
@@ -1155,7 +1216,6 @@ class FutureApp(App):
         self.clothes_sm = ScreenManager(transition=SlideTransition())
         self.clothes_sm.add_widget(ClothesSizesScreen(name='sizes'))
         self.clothes_sm.add_widget(ClothesOrdersScreen(name='orders'))
-        self.clothes_sm.add_widget(ClothesStatusScreen(name='status'))
         self.clothes_sm.add_widget(ClothesReportsScreen(name='reports'))
         self.clothes_sm.current = 'sizes'
         container.add_widget(self.clothes_sm)
@@ -1464,16 +1524,22 @@ class FutureApp(App):
         grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(6))
         grid.bind(minimum_height=grid.setter('height'))
         rows = cur.execute("""
-        SELECT coi.id, coi.worker_id, w.name, w.surname, coi.item, coi.qty, coi.issued
+        SELECT coi.id, coi.worker_id,
+               COALESCE(w.name, coi.name, ''),
+               COALESCE(w.surname, coi.surname, ''),
+               coi.item,
+               COALESCE(coi.size,''),
+               coi.qty,
+               COALESCE(coi.issued,0)
         FROM clothes_order_items coi
         LEFT JOIN workers w ON w.id=coi.worker_id
         WHERE coi.order_id=?
         """,(order_id,)).fetchall()
         for r in rows:
-            cid, wid, name, surname, item, qty, issued = r
+            cid, wid, name, surname, item, size, qty, issued = r
             row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(6))
             worker = f"{name or ''} {surname or ''}".strip()
-            lbl = Label(text=f"{worker} - {item} x{qty} {'(wydane)' if issued else ''}", halign='left', valign='middle')
+            lbl = Label(text=f"{worker} - {item} {size or '-'} x{qty} {'(wydane)' if issued else ''}", halign='left', valign='middle')
             lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(12), None)))
             row.add_widget(lbl)
             btns = BoxLayout(size_hint_x=None, width=dp(200), spacing=dp(6))
@@ -1486,8 +1552,9 @@ class FutureApp(App):
         root.add_widget(scroll)
         bottom = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(8))
         bottom.add_widget(ModernButton(text="Dodaj pozycję", on_press=lambda x: self._add_position_to_order_ui(order_id, p)))
-        bottom.add_widget(ModernButton(text="Generuj Excel x2 (hurtownia + wydanie)", on_press=lambda x: self.generate_order_excels(order_id)))
+        bottom.add_widget(ModernButton(text="Generuj Excel", on_press=lambda x: self.generate_order_excels(order_id)))
         bottom.add_widget(ModernButton(text="Zamów", on_press=lambda x: self.mark_order_ordered(order_id)))
+        bottom.add_widget(ModernButton(text="Wydaj częściowo", on_press=lambda x: self.clothes_issue_partial(order_id)))
         bottom.add_widget(ModernButton(text="Wydaj wszystkie", on_press=lambda x: [self.clothes_issue_all(order_id), p.dismiss()]))
         root.add_widget(bottom)
         popup_title = f"Zamówienie #{order_id}"
@@ -1513,15 +1580,34 @@ class FutureApp(App):
 
     def _issue_order_item_and_refresh(self, cid, order_id, popup):
         try:
+            if not self._can_issue_order(order_id):
+                return
             cur = self.conn.cursor()
-            cur.execute("SELECT worker_id, item, qty FROM clothes_order_items WHERE id=?", (cid,))
+            cur.execute("""
+            SELECT coi.worker_id,
+                   COALESCE(w.name, coi.name, ''),
+                   COALESCE(w.surname, coi.surname, ''),
+                   coi.item,
+                   COALESCE(coi.size, ''),
+                   COALESCE(coi.issued,0)
+            FROM clothes_order_items coi
+            LEFT JOIN workers w ON w.id=coi.worker_id
+            WHERE coi.id=?
+            """, (cid,))
             r = cur.fetchone()
             if not r:
                 self.msg("Błąd", "Brak pozycji")
                 return
-            wid, item, qty = r[0], r[1], r[2] or 1
-            cur.execute("INSERT INTO clothes_history(worker_id, item, date) VALUES(?,?,?)", (wid, item, datetime.now().strftime("%Y-%m-%d")))
-            cur.execute("DELETE FROM clothes_order_items WHERE id=?", (cid,))
+            wid, name, surname, item, size, issued = r
+            if int(issued or 0) == 1:
+                self.msg("Info", "Pozycja jest już wydana")
+                return
+            cur.execute("""
+            INSERT INTO clothes_history(worker_id, name, surname, item, size, date)
+            VALUES(?,?,?,?,?,?)
+            """, (wid, name, surname, item, size, datetime.now().strftime("%Y-%m-%d")))
+            cur.execute("UPDATE clothes_order_items SET issued=1 WHERE id=?", (cid,))
+            self._refresh_order_issue_status(order_id)
             self.conn.commit()
             self.msg("OK", "Pozycja wydana")
             popup.dismiss()
@@ -1589,7 +1675,7 @@ class FutureApp(App):
 
     def mark_order_ordered(self, order_id):
         try:
-            self.conn.execute("UPDATE clothes_orders SET status='Zamówione' WHERE id=?", (order_id,))
+            self.conn.execute("UPDATE clothes_orders SET status='Zamówione' WHERE id=? AND COALESCE(status,'') NOT IN ('Wydane','Częściowo wydane')", (order_id,))
             self.conn.commit()
             self.msg("OK", "Zmieniono status na 'Zamówione'")
             try:
