@@ -811,6 +811,21 @@ class FutureApp(App):
         """)
         self.conn.commit()
 
+    def init_cars_db(self):
+        """Tworzy i uzupełnia tabelę modułu samochodów."""
+        self.conn.execute("""
+        CREATE TABLE IF NOT EXISTS cars(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            registration TEXT,
+            driver TEXT,
+            mileage INTEGER DEFAULT 0,
+            service_interval INTEGER DEFAULT 15000,
+            last_service INTEGER DEFAULT 0
+        )
+        """)
+        self.conn.commit()
+
     def ensure_extended_tables(self):
         self.conn.execute("""
         CREATE TABLE IF NOT EXISTS plants(
@@ -846,6 +861,7 @@ class FutureApp(App):
         self._add_column_if_missing('workers', 'phone', 'TEXT')
         self._add_column_if_missing('workers', 'position', 'TEXT')
         self._add_column_if_missing('workers', 'hire_date', 'TEXT')
+        self.init_cars_db()
         self.conn.commit()
 
     def init_db(self):
@@ -877,6 +893,7 @@ class FutureApp(App):
         notes TEXT
         )
         """)
+        self.init_cars_db()
         self.conn.execute("""
         CREATE TABLE IF NOT EXISTS clothes_sizes(
         id INTEGER PRIMARY KEY,
@@ -2830,81 +2847,151 @@ class FutureApp(App):
         [self.global_attachments.clear(), self.update_stats(), self.log("Cleared attachments")]
 
     def refresh_cars_list(self, *args):
+        """Odświeża listę samochodów na ekranie cars."""
         if not hasattr(self, 'cars_grid'):
             return
         self.cars_grid.clear_widgets()
-        search = self.ti_cars_search.text.lower() if hasattr(self, 'ti_cars_search') else ""
-        try:
-            rows = self.conn.execute("SELECT id, plate, brand, model, plant, mileage, status, driver FROM fleet_cars ORDER BY plate").fetchall()
-        except Exception:
-            self.ensure_extended_tables()
-            rows = self.conn.execute("SELECT id, plate, brand, model, plant, mileage, status, driver FROM fleet_cars ORDER BY plate").fetchall()
+
+        search = self.ti_cars_search.text.lower().strip() if hasattr(self, 'ti_cars_search') else ""
+        self.init_cars_db()
+        rows = self.conn.execute(
+            "SELECT id, name, registration, driver, mileage, service_interval, last_service FROM cars ORDER BY name, registration"
+        ).fetchall()
+
         for row in rows:
-            text_blob = " ".join(str(x or "") for x in row).lower()
-            if search and search not in text_blob:
+            car_id, name, registration, driver, mileage, service_interval, last_service = row
+            blob = f"{name} {registration} {driver}".lower()
+            if search and search not in blob:
                 continue
-            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(220), padding=dp(10), spacing=dp(8))
+
+            mileage = int(mileage or 0)
+            service_interval = int(service_interval or 0)
+            last_service = int(last_service or 0)
+            remaining = service_interval - (mileage - last_service)
+            remaining_txt = f"Do serwisu: {remaining} km"
+            remaining_color = (0.9, 0.25, 0.25, 1) if remaining < 1500 else (0.78, 0.81, 0.87, 1)
+
+            # karta samochodu: czytelna pionowa struktura + akcje w scrollu
+            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(222), padding=dp(10), spacing=dp(8))
             with card.canvas.before:
                 Color(*COLOR_CARD)
                 rect = RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
             card.bind(pos=lambda inst, val, r=rect: setattr(r, 'pos', val), size=lambda inst, val, r=rect: setattr(r, 'size', val))
 
-            h = Label(text=f"{row[2] or '-'} {row[3] or '-'} | {row[1]}", bold=True, halign='left', size_hint_y=None, height=dp(36))
-            h.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
-            i1 = Label(text=f"Zakład: {row[4] or '-'} | Kierowca: {row[7] or '-'}", font_size='12sp', halign='left', size_hint_y=None, height=dp(28))
-            i1.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
-            i2 = Label(text=f"Przebieg: {row[5] or 0} km | Status: {row[6] or '-'}", font_size='12sp', halign='left', color=(0.78,0.81,0.87,1), size_hint_y=None, height=dp(28))
-            i2.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
-            card.add_widget(h); card.add_widget(i1); card.add_widget(i2)
+            title = Label(text=f"{name or '-'} | {registration or '-'}", bold=True, halign='left', size_hint_y=None, height=dp(36))
+            title.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            card.add_widget(title)
 
-            actions = ButtonContainer(orientation='horizontal', size_hint_y=None, height=dp(60), min_button_width=dp(132), min_button_height=dp(44))
-            actions.add_action(ModernButton(text='Edytuj', on_press=lambda x, data=row: self.form_car(*data)))
-            actions.add_action(ModernButton(text='Usuń', bg_color=(0.7,0.15,0.15,1), on_press=lambda x, cid=row[0]: self.delete_car(cid)))
+            d1 = Label(text=f"Kierowca: {driver or '-'}", halign='left', size_hint_y=None, height=dp(26))
+            d1.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            d2 = Label(text=f"Przebieg: {mileage} km | Interwał: {service_interval} km", halign='left', size_hint_y=None, height=dp(26))
+            d2.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            d3 = Label(text=remaining_txt, halign='left', color=remaining_color, size_hint_y=None, height=dp(26))
+            d3.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            card.add_widget(d1); card.add_widget(d2); card.add_widget(d3)
+
+            actions = ButtonContainer(orientation='horizontal', size_hint_y=None, height=dp(62), min_button_width=dp(170), min_button_height=dp(44))
+            actions.add_action(ModernButton(text='Zmień kierowcę', on_press=lambda x, cid=car_id, cur=driver: self.change_driver_popup(cid, cur)))
+            actions.add_action(ModernButton(text='Dodaj przebieg', on_press=lambda x, cid=car_id, cur=mileage: self.add_mileage_popup(cid, cur)))
+            actions.add_action(ModernButton(text='Potwierdź serwis', on_press=lambda x, cid=car_id: self.confirm_service(cid), bg_color=(0.18,0.58,0.36,1)))
+            actions.add_action(ModernButton(text='Usuń samochód', on_press=lambda x, cid=car_id: self.delete_car(cid), bg_color=(0.74,0.14,0.14,1)))
             card.add_widget(actions)
+
             self.cars_grid.add_widget(card)
 
-    def form_car(self, cid=None, plate='', brand='', model='', plant='', mileage=0, status='Aktywny', driver='', notes=''):
-        b = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
-        fields = {
-            'plate': TextInput(text=str(plate or ''), hint_text='Rejestracja'),
-            'brand': TextInput(text=str(brand or ''), hint_text='Marka'),
-            'model': TextInput(text=str(model or ''), hint_text='Model'),
-            'plant': TextInput(text=str(plant or ''), hint_text='Zakład'),
-            'mileage': TextInput(text=str(mileage or 0), hint_text='Przebieg'),
-            'status': TextInput(text=str(status or ''), hint_text='Status'),
-            'driver': TextInput(text=str(driver or ''), hint_text='Kierowca'),
-            'notes': TextInput(text=str(notes or ''), hint_text='Notatki', multiline=True, size_hint_y=None, height=dp(70)),
-        }
-        for key in ['plate', 'brand', 'model', 'plant', 'mileage', 'status', 'driver', 'notes']:
-            b.add_widget(fields[key])
+    def add_car_popup(self):
+        """Popup dodawania nowego samochodu."""
+        box = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
+        ti_name = ModernInput(hint_text='Nazwa samochodu')
+        ti_reg = ModernInput(hint_text='Rejestracja')
+        ti_int = ModernInput(hint_text='Interwał serwisowy (km)', text='15000')
+        box.add_widget(ti_name); box.add_widget(ti_reg); box.add_widget(ti_int)
 
         def save(_):
-            if not fields['plate'].text.strip():
-                return self.msg('Błąd', 'Pole rejestracja jest wymagane')
+            name = ti_name.text.strip()
+            reg = ti_reg.text.strip().upper()
             try:
-                mil = int(fields['mileage'].text.strip() or '0')
+                interval = int(ti_int.text.strip() or '0')
             except Exception:
-                mil = 0
-            if cid:
-                self.conn.execute(
-                    "UPDATE fleet_cars SET plate=?, brand=?, model=?, plant=?, mileage=?, status=?, driver=?, notes=? WHERE id=?",
-                    (fields['plate'].text.strip().upper(), fields['brand'].text.strip(), fields['model'].text.strip(), fields['plant'].text.strip(), mil, fields['status'].text.strip(), fields['driver'].text.strip(), fields['notes'].text.strip(), cid)
-                )
-            else:
-                self.conn.execute(
-                    "INSERT INTO fleet_cars(plate, brand, model, plant, mileage, status, driver, notes) VALUES(?,?,?,?,?,?,?,?)",
-                    (fields['plate'].text.strip().upper(), fields['brand'].text.strip(), fields['model'].text.strip(), fields['plant'].text.strip(), mil, fields['status'].text.strip(), fields['driver'].text.strip(), fields['notes'].text.strip())
-                )
+                return self.msg('Błąd', 'Interwał musi być liczbą')
+            if not name or not reg:
+                return self.msg('Błąd', 'Nazwa i rejestracja są wymagane')
+
+            self.init_cars_db()
+            self.conn.execute(
+                "INSERT INTO cars(name, registration, driver, mileage, service_interval, last_service) VALUES(?,?,?,?,?,?)",
+                (name, reg, '', 0, max(1, interval), 0)
+            )
             self.conn.commit()
             px.dismiss()
             self.refresh_cars_list()
 
-        b.add_widget(ModernButton(text='Zapisz', on_press=save))
-        px = Popup(title='Samochód', content=b, size_hint=(0.9, 0.9))
+        btns = ButtonContainer(orientation='horizontal', size_hint_y=None, height=dp(60), min_button_width=dp(140))
+        btns.add_action(ModernButton(text='Zapisz', on_press=save))
+        btns.add_action(ModernButton(text='Anuluj', on_press=lambda x: px.dismiss(), bg_color=(0.35,0.35,0.42,1)))
+        box.add_widget(btns)
+
+        px = Popup(title='+ DODAJ SAMOCHÓD', content=box, size_hint=(0.92, 0.52), auto_dismiss=False)
         px.open()
 
+    def change_driver_popup(self, car_id, current_driver=''):
+        """Popup zmiany kierowcy."""
+        box = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
+        ti_driver = ModernInput(hint_text='Imię kierowcy', text=str(current_driver or ''))
+        box.add_widget(ti_driver)
+
+        def save(_):
+            self.conn.execute('UPDATE cars SET driver=? WHERE id=?', (ti_driver.text.strip(), car_id))
+            self.conn.commit()
+            px.dismiss()
+            self.refresh_cars_list()
+
+        btns = ButtonContainer(orientation='horizontal', size_hint_y=None, height=dp(60), min_button_width=dp(140))
+        btns.add_action(ModernButton(text='Zapisz', on_press=save))
+        btns.add_action(ModernButton(text='Anuluj', on_press=lambda x: px.dismiss(), bg_color=(0.35,0.35,0.42,1)))
+        box.add_widget(btns)
+
+        px = Popup(title='Zmień kierowcę', content=box, size_hint=(0.9, 0.4), auto_dismiss=False)
+        px.open()
+
+    def add_mileage_popup(self, car_id, current_mileage=0):
+        """Popup aktualizacji przebiegu."""
+        box = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
+        ti_mileage = ModernInput(hint_text='Nowy przebieg', text=str(current_mileage or 0))
+        box.add_widget(ti_mileage)
+
+        def save(_):
+            try:
+                new_m = int(ti_mileage.text.strip() or '0')
+            except Exception:
+                return self.msg('Błąd', 'Przebieg musi być liczbą')
+            self.conn.execute('UPDATE cars SET mileage=? WHERE id=?', (max(0, new_m), car_id))
+            self.conn.commit()
+            px.dismiss()
+            self.refresh_cars_list()
+
+        btns = ButtonContainer(orientation='horizontal', size_hint_y=None, height=dp(60), min_button_width=dp(140))
+        btns.add_action(ModernButton(text='Zapisz', on_press=save))
+        btns.add_action(ModernButton(text='Anuluj', on_press=lambda x: px.dismiss(), bg_color=(0.35,0.35,0.42,1)))
+        box.add_widget(btns)
+
+        px = Popup(title='Dodaj przebieg', content=box, size_hint=(0.9, 0.4), auto_dismiss=False)
+        px.open()
+
+    def confirm_service(self, car_id):
+        """Potwierdza serwis: last_service = mileage."""
+        self.conn.execute('UPDATE cars SET last_service=mileage WHERE id=?', (car_id,))
+        self.conn.commit()
+        self.refresh_cars_list()
+        self.msg('OK', 'Serwis został potwierdzony')
+
+    def form_car(self, cid=None, plate='', brand='', model='', plant='', mileage=0, status='Aktywny', driver='', notes=''):
+        """Kompatybilność: przekierowanie do nowego popupu dodawania samochodu."""
+        self.add_car_popup()
+
     def delete_car(self, cid):
-        self.conn.execute('DELETE FROM fleet_cars WHERE id=?', (cid,))
+        """Usuwa samochód z tabeli cars."""
+        self.conn.execute('DELETE FROM cars WHERE id=?', (cid,))
         self.conn.commit()
         self.refresh_cars_list()
 
@@ -3047,20 +3134,27 @@ class FutureApp(App):
         self.refresh_plants_list()
 
     def setup_cars_ui(self):
+        """Buduje ekran cars: nagłówek, lista i panel akcji."""
         self.sc_ref["cars"].clear_widgets()
+        self.init_cars_db()
+
         shell = AppLayout(title="Samochody")
         shell.nav_tabs.add_action(SecondaryButton(text='Powrót', on_press=lambda x: setattr(self.sm, 'current', 'home')))
-        shell.nav_tabs.add_action(PrimaryButton(text='Dodaj', on_press=lambda x: self.form_car(), size_hint_x=None, width=dp(150)))
+        shell.nav_tabs.add_action(PrimaryButton(text='+ DODAJ SAMOCHÓD', on_press=lambda x: self.add_car_popup(), size_hint_x=None, width=dp(210)))
+
         body = BoxLayout(orientation='vertical', spacing=dp(8))
-        self.ti_cars_search = ModernInput(hint_text='Szukaj samochodu (rej, marka, kierowca)')
+        self.ti_cars_search = ModernInput(hint_text='Szukaj: nazwa / rejestracja / kierowca')
         self.ti_cars_search.bind(text=self.refresh_cars_list)
         body.add_widget(self.ti_cars_search)
-        self.cars_grid = GridLayout(cols=1, spacing=dp(8), size_hint_y=None)
+
+        self.cars_grid = GridLayout(cols=1, spacing=dp(8), size_hint_y=None, padding=[dp(2), dp(2)])
         self.cars_grid.bind(minimum_height=self.cars_grid.setter('height'))
-        sc = ScrollView(); sc.add_widget(self.cars_grid)
+        sc = ScrollView()
+        sc.add_widget(self.cars_grid)
         body.add_widget(sc)
+
         shell.set_content(body)
-        shell.set_fab(lambda x: self.form_car())
+        shell.set_fab(lambda x: self.add_car_popup())
         self.sc_ref['cars'].add_widget(shell)
         self.refresh_cars_list()
 
