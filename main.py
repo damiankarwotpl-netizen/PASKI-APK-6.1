@@ -397,7 +397,7 @@ class ClothesSizesScreen(Screen):
             "SELECT id, name, surname, plant, shirt, hoodie, pants, jacket, shoes FROM clothes_sizes ORDER BY surname"
         ).fetchall()
         for r in rows:
-            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(255), padding=dp(10), spacing=dp(8))
+            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(285), padding=dp(10), spacing=dp(8))
             with card.canvas.before:
                 Color(*COLOR_CARD)
                 card_rect = RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
@@ -588,20 +588,9 @@ class ProUIStyler:
             self._style_input(widget)
             return
 
-        if isinstance(widget, BoxLayout):
-            self._style_boxlayout(widget)
-            return
-
-        if isinstance(widget, GridLayout):
-            self._style_grid(widget)
-            return
-
         if isinstance(widget, ScrollView):
             self._style_scroll(widget)
             return
-
-        if isinstance(widget, Popup):
-            self._style_popup(widget)
 
     def _style_label(self, lbl):
         if not getattr(lbl, '_pro_label_applied', False):
@@ -654,42 +643,10 @@ class ProUIStyler:
             pass
 
     def _style_boxlayout(self, box):
-        # globalna poprawa spacing/padding
-        if not getattr(box, '_pro_box_spacing', False):
-            box._pro_box_spacing = True
-            try:
-                box.spacing = max(float(box.spacing), float(dp(8)))
-            except Exception:
-                pass
-
-        # karty dla list i wierszy rekordów
-        is_card_candidate = (
-            box.size_hint_y is None
-            and dp(52) <= box.height <= dp(260)
-            and len(getattr(box, 'children', [])) >= 2
-            and not getattr(box, '_pro_ui_bg', None)
-        )
-        if is_card_candidate and box.canvas is not None:
-            with box.canvas.before:
-                Color(*COLOR_CARD)
-                box._pro_ui_bg = RoundedRectangle(pos=box.pos, size=box.size, radius=[dp(12)])
-
-            def _update_bg(*_):
-                if hasattr(box, '_pro_ui_bg'):
-                    box._pro_ui_bg.pos = box.pos
-                    box._pro_ui_bg.size = box.size
-
-            box.bind(pos=_update_bg, size=_update_bg)
-            _update_bg()
+        return
 
     def _style_grid(self, grid):
-        if getattr(grid, '_pro_grid_applied', False):
-            return
-        grid._pro_grid_applied = True
-        try:
-            grid.spacing = max(float(grid.spacing), float(dp(8)))
-        except Exception:
-            pass
+        return
 
     def _style_scroll(self, sv):
         if getattr(sv, '_pro_scroll_applied', False):
@@ -701,12 +658,7 @@ class ProUIStyler:
             pass
 
     def _style_popup(self, pop):
-        if getattr(pop, '_pro_popup_applied', False):
-            return
-        pop._pro_popup_applied = True
-        if hasattr(pop, 'size_hint') and pop.size_hint:
-            sx, sy = pop.size_hint
-            pop.size_hint = (max(0.90, sx or 0.9), max(0.55, sy or 0.55))
+        return
 
 
 class FutureApp(App):
@@ -2001,9 +1953,9 @@ class FutureApp(App):
             lbl = Label(text=f"{worker} - {item} {size or '-'} x{qty} {'(wydane)' if issued else ''}", halign='left', valign='middle')
             lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(12), None)))
             row.add_widget(lbl)
-            btns = BoxLayout(size_hint_x=None, width=dp(236), spacing=dp(8))
-            btns.add_widget(ModernButton(text="Usuń", bg_color=(0.7,0.1,0.1,1), size_hint_x=None, width=dp(112), on_press=lambda x, cid=cid: self._remove_order_item_and_refresh(cid, order_id, p)))
-            btns.add_widget(ModernButton(text="Wydaj", size_hint_x=None, width=dp(112), on_press=lambda x, cid=cid: self._issue_order_item_and_refresh(cid, order_id, p)))
+            btns = BoxLayout(size_hint_x=None, width=dp(128), orientation='vertical', spacing=dp(6))
+            btns.add_widget(ModernButton(text="Usuń", bg_color=(0.7,0.1,0.1,1), size_hint_y=None, height=dp(38), on_press=lambda x, cid=cid: self._remove_order_item_and_refresh(cid, order_id, p)))
+            btns.add_widget(ModernButton(text="Wydaj", size_hint_y=None, height=dp(38), on_press=lambda x, cid=cid: self._issue_order_item_and_refresh(cid, order_id, p)))
             row.add_widget(btns)
             grid.add_widget(row)
         scroll = ScrollView()
@@ -2710,13 +2662,13 @@ class FutureApp(App):
             card = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(250), padding=dp(10), spacing=dp(8))
             with card.canvas.before:
                 Color(*COLOR_CARD)
-                rect = Rectangle(pos=r.pos, size=r.size)
-            self._bind_rect(r, rect)
-            inf = BoxLayout(orientation="vertical", size_hint_x=0.58)
-            acts = BoxLayout(size_hint_x=None, width=dp(132), orientation="vertical", spacing=dp(6))
-            name_lbl = Label(text=f"{d[0]} {d[1]}".title(), bold=True, halign="left")
-            name_lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
-            inf.add_widget(name_lbl)
+                rect = RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
+            card.bind(pos=lambda inst, val, r=rect: setattr(r, 'pos', val), size=lambda inst, val, r=rect: setattr(r, 'size', val))
+
+            name_lbl = Label(text=f"{d[0]} {d[1]}".title(), bold=True, halign="left", valign='middle', size_hint_y=None, height=dp(38))
+            name_lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(6), None)))
+            card.add_widget(name_lbl)
+
             info_text = (
                 f"E: {d[2]}\n"
                 f"PESEL: {d[3] if d[3] else '-'}\n"
@@ -3019,7 +2971,7 @@ class FutureApp(App):
             text_blob = " ".join(str(x or "") for x in row).lower()
             if search and search not in text_blob:
                 continue
-            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(190), padding=dp(10), spacing=dp(8))
+            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(220), padding=dp(10), spacing=dp(8))
             with card.canvas.before:
                 Color(*COLOR_CARD)
                 rect = RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
@@ -3093,7 +3045,7 @@ class FutureApp(App):
         for row in rows:
             if search and search not in " ".join(str(x or '') for x in row).lower():
                 continue
-            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(190), padding=dp(10), spacing=dp(8))
+            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(220), padding=dp(10), spacing=dp(8))
             with card.canvas.before:
                 Color(*COLOR_CARD)
                 rect = RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
@@ -3168,7 +3120,7 @@ class FutureApp(App):
         for row in rows:
             if search and search not in " ".join(str(x or '') for x in row).lower():
                 continue
-            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(190), padding=dp(10), spacing=dp(8))
+            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(220), padding=dp(10), spacing=dp(8))
             with card.canvas.before:
                 Color(*COLOR_CARD)
                 rect = RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
