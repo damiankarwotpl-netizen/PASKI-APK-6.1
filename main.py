@@ -397,18 +397,17 @@ class ClothesSizesScreen(Screen):
             "SELECT id, name, surname, plant, shirt, hoodie, pants, jacket, shoes FROM clothes_sizes ORDER BY surname"
         ).fetchall()
         for r in rows:
-            card = BoxLayout(size_hint_y=None, height=dp(190), padding=dp(10), spacing=dp(10))
+            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(255), padding=dp(10), spacing=dp(8))
             with card.canvas.before:
                 Color(*COLOR_CARD)
                 card_rect = RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
             card.bind(pos=lambda inst, val, rect=card_rect: setattr(rect, 'pos', val))
             card.bind(size=lambda inst, val, rect=card_rect: setattr(rect, 'size', val))
 
-            info = BoxLayout(orientation='vertical', size_hint_x=0.76, spacing=dp(4))
             full_name = f"{r[1]} {r[2]}"
-            head = Label(text=full_name, bold=True, font_size='18sp', halign='left', valign='middle', size_hint_y=None, height=dp(34))
+            head = Label(text=full_name, bold=True, font_size='18sp', halign='left', valign='middle', size_hint_y=None, height=dp(36))
             head.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(8), None)))
-            info.add_widget(head)
+            card.add_widget(head)
 
             details = [
                 f"Zakład: {r[3] if str(r[3]).strip() else '-'}",
@@ -419,17 +418,16 @@ class ClothesSizesScreen(Screen):
                 f"Rozmiar butów: {r[8] if str(r[8]).strip() else '-'}",
             ]
             for line in details:
-                lbl = Label(text=line, halign='left', valign='middle', size_hint_y=None, height=dp(22), color=(0.88, 0.9, 0.96, 1))
+                lbl = Label(text=line, halign='left', valign='middle', size_hint_y=None, height=dp(24), color=(0.88, 0.9, 0.96, 1))
                 lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(8), None)))
-                info.add_widget(lbl)
+                card.add_widget(lbl)
 
-            btns = BoxLayout(orientation='vertical', size_hint_x=0.24, spacing=dp(8), padding=[0, dp(8), 0, dp(8)])
-            btns.add_widget(ModernButton(text="Edytuj", on_press=lambda x, data=r: App.get_running_app().edit_clothes_size(data)))
-            btns.add_widget(ModernButton(text="Usuń", bg_color=(0.7,0.1,0.1,1), on_press=lambda x, data=r: App.get_running_app().delete_clothes_size(data[0])))
-
-            card.add_widget(info)
+            btns = ButtonContainer(orientation='horizontal', size_hint_y=None, height=dp(60), min_button_width=dp(132), min_button_height=dp(44))
+            btns.add_action(ModernButton(text="Edytuj", on_press=lambda x, data=r: App.get_running_app().edit_clothes_size(data)))
+            btns.add_action(ModernButton(text="Usuń", bg_color=(0.7,0.1,0.1,1), on_press=lambda x, data=r: App.get_running_app().delete_clothes_size(data[0])))
             card.add_widget(btns)
             self.list_layout.add_widget(card)
+
 
 class ClothesOrdersScreen(Screen):
     def on_enter(self):
@@ -2003,9 +2001,9 @@ class FutureApp(App):
             lbl = Label(text=f"{worker} - {item} {size or '-'} x{qty} {'(wydane)' if issued else ''}", halign='left', valign='middle')
             lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(12), None)))
             row.add_widget(lbl)
-            btns = BoxLayout(size_hint_x=None, width=dp(236), spacing=dp(8))
-            btns.add_widget(ModernButton(text="Usuń", bg_color=(0.7,0.1,0.1,1), size_hint_x=None, width=dp(112), on_press=lambda x, cid=cid: self._remove_order_item_and_refresh(cid, order_id, p)))
-            btns.add_widget(ModernButton(text="Wydaj", size_hint_x=None, width=dp(112), on_press=lambda x, cid=cid: self._issue_order_item_and_refresh(cid, order_id, p)))
+            btns = BoxLayout(size_hint_x=None, width=dp(128), orientation='vertical', spacing=dp(6))
+            btns.add_widget(ModernButton(text="Usuń", bg_color=(0.7,0.1,0.1,1), size_hint_y=None, height=dp(38), on_press=lambda x, cid=cid: self._remove_order_item_and_refresh(cid, order_id, p)))
+            btns.add_widget(ModernButton(text="Wydaj", size_hint_y=None, height=dp(38), on_press=lambda x, cid=cid: self._issue_order_item_and_refresh(cid, order_id, p)))
             row.add_widget(btns)
             grid.add_widget(row)
         scroll = ScrollView()
@@ -2708,16 +2706,17 @@ class FutureApp(App):
                 continue
             if sv_city and sv_city not in str(d[6]).lower():
                 continue
-            r = BoxLayout(size_hint_y=None, height=dp(190), padding=dp(10), spacing=dp(8))
-            with r.canvas.before:
+
+            card = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(250), padding=dp(10), spacing=dp(8))
+            with card.canvas.before:
                 Color(*COLOR_CARD)
-                rect = Rectangle(pos=r.pos, size=r.size)
-            self._bind_rect(r, rect)
-            inf = BoxLayout(orientation="vertical", size_hint_x=0.58)
-            acts = BoxLayout(size_hint_x=None, width=dp(132), orientation="vertical", spacing=dp(6))
-            name_lbl = Label(text=f"{d[0]} {d[1]}".title(), bold=True, halign="left")
-            name_lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
-            inf.add_widget(name_lbl)
+                rect = RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
+            card.bind(pos=lambda inst, val, r=rect: setattr(r, 'pos', val), size=lambda inst, val, r=rect: setattr(r, 'size', val))
+
+            name_lbl = Label(text=f"{d[0]} {d[1]}".title(), bold=True, halign="left", valign='middle', size_hint_y=None, height=dp(38))
+            name_lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(6), None)))
+            card.add_widget(name_lbl)
+
             info_text = (
                 f"E: {d[2]}\n"
                 f"PESEL: {d[3] if d[3] else '-'}\n"
@@ -2726,15 +2725,18 @@ class FutureApp(App):
                 f"Adres: {d[6] if d[6] else '-'}\n"
                 f"Notatka: {d[7] if d[7] else '-'}"
             )
-            info_lbl = Label(text=info_text, font_size='11sp', halign="left", valign='top', color=(0.7,0.7,0.7,1))
-            info_lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
-            inf.add_widget(info_lbl)
-            r.add_widget(inf)
-            qbox = self.contact_quick_actions(d[4], d[0], d[1])
-            r.add_widget(qbox)
-            acts.add_widget(Button(text="Edytuj", on_press=lambda x, data=d: self.form_contact(*data)))
-            acts.add_widget(Button(text="Usuń", background_color=(0.8,0.2,0.2,1), on_press=lambda x, n=d[0], s=d[1]: self.delete_contact(n, s)))
-            r.add_widget(acts); self.c_ls.add_widget(r)
+            info_lbl = Label(text=info_text, font_size='12sp', halign="left", valign='top', color=(0.84,0.86,0.92,1))
+            info_lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(6), None)))
+            card.add_widget(info_lbl)
+
+            actions = ButtonContainer(orientation='horizontal', size_hint_y=None, height=dp(60), min_button_width=dp(132), min_button_height=dp(44))
+            phone_txt = str(d[4]).strip() if d[4] else ""
+            actions.add_action(ModernButton(text="Zadzwoń", on_press=lambda x, ph=phone_txt: self._call_contact(ph), bg_color=(0.16,0.6,0.3,1)))
+            actions.add_action(ModernButton(text="WhatsApp", on_press=lambda x, ph=phone_txt, nm=d[0]: self._whatsapp_contact(ph, nm), bg_color=(0.06,0.55,0.25,1)))
+            actions.add_action(ModernButton(text="Edytuj", on_press=lambda x, data=d: self.form_contact(*data)))
+            actions.add_action(ModernButton(text="Usuń", bg_color=(0.8,0.2,0.2,1), on_press=lambda x, n=d[0], sn=d[1]: self.delete_contact(n, sn)))
+            card.add_widget(actions)
+            self.c_ls.add_widget(card)
 
     def msg(self, tit, txt):
         b = BoxLayout(orientation="vertical", padding=dp(18), spacing=dp(10))
@@ -3017,25 +3019,23 @@ class FutureApp(App):
             text_blob = " ".join(str(x or "") for x in row).lower()
             if search and search not in text_blob:
                 continue
-            card = BoxLayout(size_hint_y=None, height=dp(145), padding=dp(8), spacing=dp(8))
+            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(190), padding=dp(10), spacing=dp(8))
             with card.canvas.before:
                 Color(*COLOR_CARD)
-                rect = Rectangle(pos=card.pos, size=card.size)
-            self._bind_rect(card, rect)
-            info = BoxLayout(orientation='vertical')
-            h = Label(text=f"{row[2] or '-'} {row[3] or '-'} | {row[1]}", bold=True, halign='left')
+                rect = RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
+            card.bind(pos=lambda inst, val, r=rect: setattr(r, 'pos', val), size=lambda inst, val, r=rect: setattr(r, 'size', val))
+
+            h = Label(text=f"{row[2] or '-'} {row[3] or '-'} | {row[1]}", bold=True, halign='left', size_hint_y=None, height=dp(36))
             h.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
-            i1 = Label(text=f"Zakład: {row[4] or '-'} | Kierowca: {row[7] or '-'}", font_size='11sp', halign='left')
+            i1 = Label(text=f"Zakład: {row[4] or '-'} | Kierowca: {row[7] or '-'}", font_size='12sp', halign='left', size_hint_y=None, height=dp(28))
             i1.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
-            i2 = Label(text=f"Przebieg: {row[5] or 0} km | Status: {row[6] or '-'}", font_size='11sp', halign='left', color=(0.78,0.81,0.87,1))
+            i2 = Label(text=f"Przebieg: {row[5] or 0} km | Status: {row[6] or '-'}", font_size='12sp', halign='left', color=(0.78,0.81,0.87,1), size_hint_y=None, height=dp(28))
             i2.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
-            info.add_widget(h)
-            info.add_widget(i1)
-            info.add_widget(i2)
-            actions = BoxLayout(size_hint_x=0.32, orientation='vertical', spacing=dp(4))
-            actions.add_widget(ModernButton(text='Edytuj', on_press=lambda x, data=row: self.form_car(*data)))
-            actions.add_widget(ModernButton(text='Usuń', bg_color=(0.7,0.15,0.15,1), on_press=lambda x, cid=row[0]: self.delete_car(cid)))
-            card.add_widget(info)
+            card.add_widget(h); card.add_widget(i1); card.add_widget(i2)
+
+            actions = ButtonContainer(orientation='horizontal', size_hint_y=None, height=dp(60), min_button_width=dp(132), min_button_height=dp(44))
+            actions.add_action(ModernButton(text='Edytuj', on_press=lambda x, data=row: self.form_car(*data)))
+            actions.add_action(ModernButton(text='Usuń', bg_color=(0.7,0.15,0.15,1), on_press=lambda x, cid=row[0]: self.delete_car(cid)))
             card.add_widget(actions)
             self.cars_grid.add_widget(card)
 
@@ -3089,34 +3089,29 @@ class FutureApp(App):
             return
         self.workers_grid.clear_widgets()
         search = self.ti_workers_search.text.lower() if hasattr(self, 'ti_workers_search') else ''
-        try:
-            rows = self.conn.execute('SELECT id, name, surname, plant, phone, position, hire_date FROM workers ORDER BY surname').fetchall()
-        except Exception:
-            self.ensure_extended_tables()
-            rows = self.conn.execute('SELECT id, name, surname, plant, phone, position, hire_date FROM workers ORDER BY surname').fetchall()
+        rows = self.conn.execute('SELECT id, name, surname, plant, phone, position, hire_date FROM workers ORDER BY surname, name').fetchall()
         for row in rows:
             if search and search not in " ".join(str(x or '') for x in row).lower():
                 continue
-            card = BoxLayout(size_hint_y=None, height=dp(145), padding=dp(8), spacing=dp(8))
+            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(190), padding=dp(10), spacing=dp(8))
             with card.canvas.before:
                 Color(*COLOR_CARD)
-                rect = Rectangle(pos=card.pos, size=card.size)
-            self._bind_rect(card, rect)
-            info = BoxLayout(orientation='vertical')
-            h = Label(text=f"{row[1]} {row[2]}", bold=True, halign='left')
-            h.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
-            i1 = Label(text=f"Stanowisko: {row[5] or '-'} | Zakład: {row[3] or '-'}", font_size='11sp', halign='left')
-            i1.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
-            i2 = Label(text=f"Telefon: {row[4] or '-'} | Zatrudniony: {row[6] or '-'}", font_size='11sp', halign='left', color=(0.78,0.81,0.87,1))
-            i2.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
-            info.add_widget(h)
-            info.add_widget(i1)
-            info.add_widget(i2)
-            act = BoxLayout(size_hint_x=0.32, orientation='vertical', spacing=dp(4))
-            act.add_widget(ModernButton(text='Edytuj', on_press=lambda x, data=row: self.form_worker(*data)))
-            act.add_widget(ModernButton(text='Usuń', bg_color=(0.7,0.15,0.15,1), on_press=lambda x, wid=row[0]: self.delete_worker(wid)))
-            card.add_widget(info)
-            card.add_widget(act)
+                rect = RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
+            card.bind(pos=lambda inst, val, r=rect: setattr(r, 'pos', val), size=lambda inst, val, r=rect: setattr(r, 'size', val))
+
+            name_lbl = Label(text=f"{row[1] or '-'} {row[2] or '-'}", bold=True, halign='left', size_hint_y=None, height=dp(38))
+            name_lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            card.add_widget(name_lbl)
+            d1 = Label(text=f"Stanowisko: {row[5] or '-'} | Zakład: {row[3] or '-'}", font_size='12sp', halign='left', size_hint_y=None, height=dp(28))
+            d1.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            d2 = Label(text=f"Telefon: {row[4] or '-'} | Zatrudniony: {row[6] or '-'}", font_size='12sp', halign='left', color=(0.78,0.81,0.87,1), size_hint_y=None, height=dp(28))
+            d2.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
+            card.add_widget(d1); card.add_widget(d2)
+
+            actions = ButtonContainer(orientation='horizontal', size_hint_y=None, height=dp(60), min_button_width=dp(132), min_button_height=dp(44))
+            actions.add_action(ModernButton(text='Edytuj', on_press=lambda x, data=row: self.form_worker(*data)))
+            actions.add_action(ModernButton(text='Usuń', bg_color=(0.7,0.15,0.15,1), on_press=lambda x, wid=row[0]: self.delete_worker(wid)))
+            card.add_widget(actions)
             self.workers_grid.add_widget(card)
 
     def form_worker(self, wid=None, name='', surname='', plant='', phone='', position='', hire_date=''):
@@ -3173,26 +3168,24 @@ class FutureApp(App):
         for row in rows:
             if search and search not in " ".join(str(x or '') for x in row).lower():
                 continue
-            card = BoxLayout(size_hint_y=None, height=dp(145), padding=dp(8), spacing=dp(8))
+            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(190), padding=dp(10), spacing=dp(8))
             with card.canvas.before:
                 Color(*COLOR_CARD)
-                rect = Rectangle(pos=card.pos, size=card.size)
-            self._bind_rect(card, rect)
-            info = BoxLayout(orientation='vertical')
-            h = Label(text=f"{row[1] or '-'} ({row[2] or '-'})", bold=True, halign='left')
+                rect = RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
+            card.bind(pos=lambda inst, val, r=rect: setattr(r, 'pos', val), size=lambda inst, val, r=rect: setattr(r, 'size', val))
+
+            h = Label(text=f"{row[1] or '-'} ({row[2] or '-'})", bold=True, halign='left', size_hint_y=None, height=dp(36))
             h.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
-            i1 = Label(text=f"Adres: {row[3] or '-'}", font_size='11sp', halign='left')
+            i1 = Label(text=f"Adres: {row[3] or '-'}", font_size='12sp', halign='left', size_hint_y=None, height=dp(28))
             i1.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
-            i2 = Label(text=f"Tel: {row[4] or '-'} | Notatki: {row[5] or '-'}", font_size='11sp', halign='left', color=(0.78,0.81,0.87,1))
+            i2 = Label(text=f"Tel: {row[4] or '-'} | Notatki: {row[5] or '-'}", font_size='12sp', halign='left', color=(0.78,0.81,0.87,1), size_hint_y=None, height=dp(28))
             i2.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
-            info.add_widget(h)
-            info.add_widget(i1)
-            info.add_widget(i2)
-            act = BoxLayout(size_hint_x=0.32, orientation='vertical', spacing=dp(4))
-            act.add_widget(ModernButton(text='Edytuj', on_press=lambda x, data=row: self.form_plant(*data)))
-            act.add_widget(ModernButton(text='Usuń', bg_color=(0.7,0.15,0.15,1), on_press=lambda x, pid=row[0]: self.delete_plant(pid)))
-            card.add_widget(info)
-            card.add_widget(act)
+            card.add_widget(h); card.add_widget(i1); card.add_widget(i2)
+
+            actions = ButtonContainer(orientation='horizontal', size_hint_y=None, height=dp(60), min_button_width=dp(132), min_button_height=dp(44))
+            actions.add_action(ModernButton(text='Edytuj', on_press=lambda x, data=row: self.form_plant(*data)))
+            actions.add_action(ModernButton(text='Usuń', bg_color=(0.7,0.15,0.15,1), on_press=lambda x, pid=row[0]: self.delete_plant(pid)))
+            card.add_widget(actions)
             self.plants_grid.add_widget(card)
 
     def form_plant(self, pid=None, name='', city='', address='', contact_phone='', notes=''):
