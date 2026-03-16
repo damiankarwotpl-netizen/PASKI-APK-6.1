@@ -268,15 +268,25 @@ class SearchBar(BoxLayout):
 
 class AppActionBar(ScrollView):
     def __init__(self, **kwargs):
-        super().__init__(size_hint_y=None, height=dp(62), do_scroll_y=False, **kwargs)
+        super().__init__(size_hint_y=None, height=dp(64), do_scroll_y=False, do_scroll_x=True, bar_width=dp(6), **kwargs)
         self.row = BoxLayout(orientation="horizontal", size_hint_x=None, spacing=dp(8), padding=[dp(8), dp(6)])
         self.row.bind(minimum_width=self.row.setter("width"))
         self.add_widget(self.row)
 
+    def _calc_btn_width(self, widget):
+        txt = (getattr(widget, 'text', '') or '').strip()
+        probe = CoreLabel(text=txt, font_size=getattr(widget, 'font_size', dp(16)), bold=getattr(widget, 'bold', True))
+        probe.refresh()
+        tw = probe.texture.size[0] if probe.texture else dp(90)
+        return max(dp(138), tw + dp(42))
+
     def add_action(self, widget):
-        if widget.size_hint_x is None:
-            widget.width = max(getattr(widget, "width", dp(140)), dp(140))
+        widget.size_hint_x = None
+        if getattr(widget, 'size_hint_y', 1) is None:
+            widget.height = max(widget.height, dp(48))
+        widget.width = max(getattr(widget, "width", 0), self._calc_btn_width(widget))
         self.row.add_widget(widget)
+        Clock.schedule_once(lambda dt: setattr(self, 'scroll_x', 0), 0)
 
 
 class FloatingActionButton(PrimaryButton):
@@ -1948,26 +1958,29 @@ class FutureApp(App):
         """,(order_id,)).fetchall()
         for r in rows:
             cid, wid, name, surname, item, size, qty, issued = r
-            row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(6))
+            row = BoxLayout(size_hint_y=None, height=dp(66), spacing=dp(8))
             worker = f"{name or ''} {surname or ''}".strip()
             lbl = Label(text=f"{worker} - {item} {size or '-'} x{qty} {'(wydane)' if issued else ''}", halign='left', valign='middle')
             lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(12), None)))
             row.add_widget(lbl)
-            btns = BoxLayout(size_hint_x=None, width=dp(200), spacing=dp(6))
-            btns.add_widget(ModernButton(text="Usuń", bg_color=(0.7,0.1,0.1,1), size_hint_x=None, width=dp(70), on_press=lambda x, cid=cid: self._remove_order_item_and_refresh(cid, order_id, p)))
-            btns.add_widget(ModernButton(text="Wydaj", size_hint_x=None, width=dp(70), on_press=lambda x, cid=cid: self._issue_order_item_and_refresh(cid, order_id, p)))
+            btns = BoxLayout(size_hint_x=None, width=dp(236), spacing=dp(8))
+            btns.add_widget(ModernButton(text="Usuń", bg_color=(0.7,0.1,0.1,1), size_hint_x=None, width=dp(112), on_press=lambda x, cid=cid: self._remove_order_item_and_refresh(cid, order_id, p)))
+            btns.add_widget(ModernButton(text="Wydaj", size_hint_x=None, width=dp(112), on_press=lambda x, cid=cid: self._issue_order_item_and_refresh(cid, order_id, p)))
             row.add_widget(btns)
             grid.add_widget(row)
         scroll = ScrollView()
         scroll.add_widget(grid)
         root.add_widget(scroll)
-        bottom = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(8))
-        bottom.add_widget(ModernButton(text="Dodaj pozycję", on_press=lambda x: self._add_position_to_order_ui(order_id, p)))
-        bottom.add_widget(ModernButton(text="Generuj Excel", on_press=lambda x: self.generate_order_excels(order_id)))
-        bottom.add_widget(ModernButton(text="Zamów", on_press=lambda x: self.mark_order_ordered(order_id)))
-        bottom.add_widget(ModernButton(text="Wydaj częściowo", on_press=lambda x: self.clothes_issue_partial(order_id)))
-        bottom.add_widget(ModernButton(text="Wydaj wszystkie", on_press=lambda x: [self.clothes_issue_all(order_id), p.dismiss()]))
-        root.add_widget(bottom)
+        bottom_scroll = ScrollView(size_hint_y=None, height=dp(64), do_scroll_y=False)
+        bottom = BoxLayout(size_hint_x=None, height=dp(64), spacing=dp(8), padding=[dp(4), dp(6)])
+        bottom.bind(minimum_width=bottom.setter('width'))
+        bottom.add_widget(ModernButton(text="Dodaj pozycję", size_hint_x=None, width=dp(180), on_press=lambda x: self._add_position_to_order_ui(order_id, p)))
+        bottom.add_widget(ModernButton(text="Generuj Excel", size_hint_x=None, width=dp(180), on_press=lambda x: self.generate_order_excels(order_id)))
+        bottom.add_widget(ModernButton(text="Zamów", size_hint_x=None, width=dp(140), on_press=lambda x: self.mark_order_ordered(order_id)))
+        bottom.add_widget(ModernButton(text="Wydaj częściowo", size_hint_x=None, width=dp(190), on_press=lambda x: self.clothes_issue_partial(order_id)))
+        bottom.add_widget(ModernButton(text="Wydaj wszystkie", size_hint_x=None, width=dp(190), on_press=lambda x: [self.clothes_issue_all(order_id), p.dismiss()]))
+        bottom_scroll.add_widget(bottom)
+        root.add_widget(bottom_scroll)
         popup_title = f"Zamówienie #{order_id}"
         if order_desc:
             popup_title = f"{popup_title} - {order_desc}"
@@ -2663,7 +2676,8 @@ class FutureApp(App):
                 Color(*COLOR_CARD)
                 rect = Rectangle(pos=r.pos, size=r.size)
             self._bind_rect(r, rect)
-            inf, acts = BoxLayout(orientation="vertical"), BoxLayout(size_hint_x=0.22, orientation="vertical", spacing=dp(4))
+            inf = BoxLayout(orientation="vertical", size_hint_x=0.58)
+            acts = BoxLayout(size_hint_x=None, width=dp(132), orientation="vertical", spacing=dp(6))
             name_lbl = Label(text=f"{d[0]} {d[1]}".title(), bold=True, halign="left")
             name_lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(4), None)))
             inf.add_widget(name_lbl)
@@ -2920,7 +2934,7 @@ class FutureApp(App):
             self.msg("Błąd", "Nie udało się otworzyć WhatsApp")
 
     def contact_quick_actions(self, phone, name, surname):
-        box = BoxLayout(size_hint_x=0.24, orientation='vertical', spacing=dp(4))
+        box = BoxLayout(size_hint_x=None, width=dp(155), orientation='vertical', spacing=dp(6))
         phone_txt = str(phone).strip() if phone else ""
 
         def copy_phone(_):
@@ -2945,7 +2959,7 @@ class FutureApp(App):
         box.add_widget(ModernButton(text="Zadzwoń", on_press=lambda x: self._call_contact(phone_txt), bg_color=(0.16,0.6,0.3,1)))
         box.add_widget(ModernButton(text="WhatsApp", on_press=lambda x: self._whatsapp_contact(phone_txt, name), bg_color=(0.06,0.55,0.25,1)))
         box.add_widget(ModernButton(text="Kopiuj tel", on_press=copy_phone))
-        box.add_widget(ModernButton(text="Kopiuj imię", on_press=copy_full_name, bg_color=(0.21,0.43,0.72,1)))
+        box.add_widget(ModernButton(text="Kopiuj dane", on_press=copy_full_name, bg_color=(0.21,0.43,0.72,1)))
         return box
 
     def clear_all_attachments(self, _):
