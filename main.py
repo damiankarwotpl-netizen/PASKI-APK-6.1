@@ -266,11 +266,34 @@ class SearchBar(BoxLayout):
         self.add_widget(self.input)
 
 
-class AppActionBar(ScrollView):
-    def __init__(self, **kwargs):
-        super().__init__(size_hint_y=None, height=dp(64), do_scroll_y=False, do_scroll_x=True, bar_width=dp(6), **kwargs)
-        self.row = BoxLayout(orientation="horizontal", size_hint_x=None, spacing=dp(8), padding=[dp(8), dp(6)])
-        self.row.bind(minimum_width=self.row.setter("width"))
+class ButtonContainer(ScrollView):
+    """Reusable container for action buttons.
+
+    Layout rules:
+    - keeps consistent spacing/padding and minimum button size,
+    - prevents overlap by forcing explicit button widths/heights,
+    - automatically enables scrolling when content overflows.
+    """
+
+    def __init__(self, orientation='horizontal', min_button_width=dp(138), min_button_height=dp(48), **kwargs):
+        self.orientation = orientation
+        self.min_button_width = min_button_width
+        self.min_button_height = min_button_height
+        kwargs.setdefault('size_hint_y', None)
+        kwargs.setdefault('height', dp(64) if orientation == 'horizontal' else dp(200))
+        kwargs.setdefault('do_scroll_x', orientation == 'horizontal')
+        kwargs.setdefault('do_scroll_y', orientation == 'vertical')
+        kwargs.setdefault('bar_width', dp(6))
+        super().__init__(**kwargs)
+
+        # Inner layout is sized by minimum_* bindings so overflow is handled by ScrollView.
+        if orientation == 'horizontal':
+            self.row = BoxLayout(orientation='horizontal', size_hint_x=None, spacing=dp(8), padding=[dp(8), dp(6)])
+            self.row.bind(minimum_width=self.row.setter('width'))
+        else:
+            self.row = GridLayout(cols=1, size_hint_y=None, spacing=dp(8), padding=[dp(6), dp(6)])
+            self.row.bind(minimum_height=self.row.setter('height'))
+
         self.add_widget(self.row)
 
     def _calc_btn_width(self, widget):
@@ -278,15 +301,32 @@ class AppActionBar(ScrollView):
         probe = CoreLabel(text=txt, font_size=getattr(widget, 'font_size', dp(16)), bold=getattr(widget, 'bold', True))
         probe.refresh()
         tw = probe.texture.size[0] if probe.texture else dp(90)
-        return max(dp(138), tw + dp(42))
+        return max(self.min_button_width, tw + dp(42))
+
+    def _normalize_button(self, widget):
+        widget.size_hint_x = None
+        widget.size_hint_y = None
+        widget.height = max(getattr(widget, 'height', 0), self.min_button_height)
+        if self.orientation == 'horizontal':
+            widget.width = max(getattr(widget, 'width', 0), self._calc_btn_width(widget))
+        else:
+            widget.width = max(getattr(widget, 'width', 0), self.min_button_width)
 
     def add_action(self, widget):
-        widget.size_hint_x = None
-        if getattr(widget, 'size_hint_y', 1) is None:
-            widget.height = max(widget.height, dp(48))
-        widget.width = max(getattr(widget, "width", 0), self._calc_btn_width(widget))
+        self._normalize_button(widget)
         self.row.add_widget(widget)
-        Clock.schedule_once(lambda dt: setattr(self, 'scroll_x', 0), 0)
+        if self.orientation == 'horizontal':
+            # Keep first actions visible after dynamic updates.
+            Clock.schedule_once(lambda dt: setattr(self, 'scroll_x', 0), 0)
+
+
+class AppActionBar(ButtonContainer):
+    """Backward-compatible alias used across existing screens."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault('orientation', 'horizontal')
+        kwargs.setdefault('height', dp(64))
+        super().__init__(**kwargs)
 
 
 class FloatingActionButton(PrimaryButton):
@@ -1971,16 +2011,13 @@ class FutureApp(App):
         scroll = ScrollView()
         scroll.add_widget(grid)
         root.add_widget(scroll)
-        bottom_scroll = ScrollView(size_hint_y=None, height=dp(64), do_scroll_y=False)
-        bottom = BoxLayout(size_hint_x=None, height=dp(64), spacing=dp(8), padding=[dp(4), dp(6)])
-        bottom.bind(minimum_width=bottom.setter('width'))
-        bottom.add_widget(ModernButton(text="Dodaj pozycję", size_hint_x=None, width=dp(180), on_press=lambda x: self._add_position_to_order_ui(order_id, p)))
-        bottom.add_widget(ModernButton(text="Generuj Excel", size_hint_x=None, width=dp(180), on_press=lambda x: self.generate_order_excels(order_id)))
-        bottom.add_widget(ModernButton(text="Zamów", size_hint_x=None, width=dp(140), on_press=lambda x: self.mark_order_ordered(order_id)))
-        bottom.add_widget(ModernButton(text="Wydaj częściowo", size_hint_x=None, width=dp(190), on_press=lambda x: self.clothes_issue_partial(order_id)))
-        bottom.add_widget(ModernButton(text="Wydaj wszystkie", size_hint_x=None, width=dp(190), on_press=lambda x: [self.clothes_issue_all(order_id), p.dismiss()]))
-        bottom_scroll.add_widget(bottom)
-        root.add_widget(bottom_scroll)
+        bottom = ButtonContainer(orientation='horizontal', size_hint_y=None, height=dp(64))
+        bottom.add_action(ModernButton(text="Dodaj pozycję", on_press=lambda x: self._add_position_to_order_ui(order_id, p)))
+        bottom.add_action(ModernButton(text="Generuj Excel", on_press=lambda x: self.generate_order_excels(order_id)))
+        bottom.add_action(ModernButton(text="Zamów", on_press=lambda x: self.mark_order_ordered(order_id)))
+        bottom.add_action(ModernButton(text="Wydaj częściowo", on_press=lambda x: self.clothes_issue_partial(order_id)))
+        bottom.add_action(ModernButton(text="Wydaj wszystkie", on_press=lambda x: [self.clothes_issue_all(order_id), p.dismiss()]))
+        root.add_widget(bottom)
         popup_title = f"Zamówienie #{order_id}"
         if order_desc:
             popup_title = f"{popup_title} - {order_desc}"
@@ -2934,7 +2971,8 @@ class FutureApp(App):
             self.msg("Błąd", "Nie udało się otworzyć WhatsApp")
 
     def contact_quick_actions(self, phone, name, surname):
-        box = BoxLayout(size_hint_x=None, width=dp(155), orientation='vertical', spacing=dp(6))
+        # Vertical button container keeps actions readable and scrollable on small phones.
+        box = ButtonContainer(orientation='vertical', size_hint_x=None, width=dp(162), size_hint_y=None, height=dp(198), min_button_width=dp(146), min_button_height=dp(44))
         phone_txt = str(phone).strip() if phone else ""
 
         def copy_phone(_):
@@ -2956,10 +2994,10 @@ class FutureApp(App):
             except Exception:
                 self.msg("Błąd", "Nie udało się skopiować danych")
 
-        box.add_widget(ModernButton(text="Zadzwoń", on_press=lambda x: self._call_contact(phone_txt), bg_color=(0.16,0.6,0.3,1)))
-        box.add_widget(ModernButton(text="WhatsApp", on_press=lambda x: self._whatsapp_contact(phone_txt, name), bg_color=(0.06,0.55,0.25,1)))
-        box.add_widget(ModernButton(text="Kopiuj tel", on_press=copy_phone))
-        box.add_widget(ModernButton(text="Kopiuj dane", on_press=copy_full_name, bg_color=(0.21,0.43,0.72,1)))
+        box.add_action(ModernButton(text="Zadzwoń", on_press=lambda x: self._call_contact(phone_txt), bg_color=(0.16,0.6,0.3,1)))
+        box.add_action(ModernButton(text="WhatsApp", on_press=lambda x: self._whatsapp_contact(phone_txt, name), bg_color=(0.06,0.55,0.25,1)))
+        box.add_action(ModernButton(text="Kopiuj tel", on_press=copy_phone))
+        box.add_action(ModernButton(text="Kopiuj dane", on_press=copy_full_name, bg_color=(0.21,0.43,0.72,1)))
         return box
 
     def clear_all_attachments(self, _):
