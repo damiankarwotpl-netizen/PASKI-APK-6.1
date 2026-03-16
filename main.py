@@ -2899,13 +2899,73 @@ class FutureApp(App):
 
             self.cars_grid.add_widget(card)
 
+    def _open_driver_picker(self, target_input):
+        """Wybór kierowcy z wyszukiwarką opartą o kontakty i pracowników."""
+        box = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
+        search = ModernInput(hint_text='Szukaj kierowcy (kontakty/pracownicy)...')
+        box.add_widget(search)
+
+        sc = ScrollView()
+        gl = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=[dp(2), dp(2)])
+        gl.bind(minimum_height=gl.setter('height'))
+        sc.add_widget(gl)
+        box.add_widget(sc)
+
+        # Zbieramy kandydatów z obu modułów.
+        people = set()
+        try:
+            for n, sn in self.conn.execute("SELECT name, surname FROM contacts").fetchall():
+                full = f"{str(n or '').strip().title()} {str(sn or '').strip().title()}".strip()
+                if full:
+                    people.add(full)
+        except Exception:
+            pass
+        try:
+            for n, sn in self.conn.execute("SELECT name, surname FROM workers").fetchall():
+                full = f"{str(n or '').strip().title()} {str(sn or '').strip().title()}".strip()
+                if full:
+                    people.add(full)
+        except Exception:
+            pass
+
+        people = sorted(people)
+
+        def refill(query=''):
+            gl.clear_widgets()
+            q = (query or '').lower().strip()
+            shown = 0
+            for person in people:
+                if q and q not in person.lower():
+                    continue
+                shown += 1
+                gl.add_widget(ModernButton(
+                    text=person,
+                    size_hint_y=None,
+                    height=dp(46),
+                    on_press=lambda x, p=person: [setattr(target_input, 'text', p), px.dismiss()]
+                ))
+            if shown == 0:
+                gl.add_widget(Label(text='Brak wyników', size_hint_y=None, height=dp(34), color=(0.8,0.82,0.88,1)))
+
+        search.bind(text=lambda inst, val: refill(val))
+        refill()
+
+        btns = ButtonContainer(orientation='horizontal', size_hint_y=None, height=dp(58), min_button_width=dp(120))
+        btns.add_action(ModernButton(text='Zamknij', on_press=lambda x: px.dismiss(), bg_color=(0.35,0.35,0.42,1)))
+        box.add_widget(btns)
+
+        px = Popup(title='Wybierz kierowcę', content=box, size_hint=(0.92, 0.8), auto_dismiss=False)
+        px.open()
+
     def add_car_popup(self):
         """Popup dodawania nowego samochodu."""
         box = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
         ti_name = ModernInput(hint_text='Nazwa samochodu')
         ti_reg = ModernInput(hint_text='Rejestracja')
+        ti_driver = ModernInput(hint_text='Kierowca (opcjonalnie)')
         ti_int = ModernInput(hint_text='Interwał serwisowy (km)', text='15000')
-        box.add_widget(ti_name); box.add_widget(ti_reg); box.add_widget(ti_int)
+        box.add_widget(ti_name); box.add_widget(ti_reg); box.add_widget(ti_driver); box.add_widget(ti_int)
+        box.add_widget(ModernButton(text='Wybierz kierowcę z kontaktów/pracowników', size_hint_y=None, height=dp(44), on_press=lambda x: self._open_driver_picker(ti_driver)))
 
         def save(_):
             name = ti_name.text.strip()
@@ -2920,7 +2980,7 @@ class FutureApp(App):
             self.init_cars_db()
             self.conn.execute(
                 "INSERT INTO cars(name, registration, driver, mileage, service_interval, last_service) VALUES(?,?,?,?,?,?)",
-                (name, reg, '', 0, max(1, interval), 0)
+                (name, reg, ti_driver.text.strip(), 0, max(1, interval), 0)
             )
             self.conn.commit()
             px.dismiss()
@@ -2939,6 +2999,7 @@ class FutureApp(App):
         box = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
         ti_driver = ModernInput(hint_text='Imię kierowcy', text=str(current_driver or ''))
         box.add_widget(ti_driver)
+        box.add_widget(ModernButton(text='Wybierz z kontaktów/pracowników', size_hint_y=None, height=dp(44), on_press=lambda x: self._open_driver_picker(ti_driver)))
 
         def save(_):
             self.conn.execute('UPDATE cars SET driver=? WHERE id=?', (ti_driver.text.strip(), car_id))
