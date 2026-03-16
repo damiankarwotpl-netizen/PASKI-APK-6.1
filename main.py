@@ -369,6 +369,112 @@ class ClothesReportsScreen(Screen):
         App.get_running_app().msg("OK", f"Zapisano: {path.name}")
         db.log(f"Generated clothes report: {path}")
 
+
+class ProUIStyler:
+    """Lekki styler UI: poprawia wygląd globalnie bez zmiany logiki."""
+
+    def __init__(self):
+        self._scan_event = None
+
+    def start(self, root_widget):
+        if not root_widget:
+            return
+        self.apply(root_widget)
+        if self._scan_event is not None:
+            self._scan_event.cancel()
+        self._scan_event = Clock.schedule_interval(lambda dt: self.apply(root_widget), 1.5)
+
+    def apply(self, widget):
+        try:
+            self._style_widget(widget)
+        except Exception:
+            pass
+        for child in getattr(widget, "children", []):
+            self.apply(child)
+
+    def _style_widget(self, widget):
+        if getattr(widget, "_pro_ui_applied", False):
+            return
+
+        if isinstance(widget, Label):
+            self._style_label(widget)
+            return
+
+        if isinstance(widget, Button):
+            self._style_button(widget)
+            return
+
+        if isinstance(widget, TextInput):
+            self._style_input(widget)
+            return
+
+        if isinstance(widget, BoxLayout):
+            self._style_card(widget)
+
+    def _style_label(self, lbl):
+        lbl._pro_ui_applied = True
+        if getattr(lbl, "halign", "") in ("", None):
+            lbl.halign = "left"
+        lbl.valign = "middle"
+
+        def _update_text_size(*_):
+            lbl.text_size = (max(dp(30), lbl.width - dp(8)), None)
+
+        lbl.bind(size=_update_text_size)
+        _update_text_size()
+
+    def _style_button(self, btn):
+        btn._pro_ui_applied = True
+        btn.height = max(btn.height, dp(46))
+        btn.padding = (dp(14), dp(10))
+        btn.halign = "center"
+        btn.valign = "middle"
+
+        if btn.size_hint_x is None:
+            btn.width = max(btn.width, dp(132))
+
+        def _update_btn_text(*_):
+            btn.text_size = (max(dp(60), btn.width - dp(16)), None)
+
+        if hasattr(btn, "text_size"):
+            btn.bind(size=_update_btn_text)
+            _update_btn_text()
+
+    def _style_input(self, ti):
+        ti._pro_ui_applied = True
+        ti.padding = [dp(12), dp(12)]
+        ti.cursor_width = max(1, int(dp(2)))
+
+    def _style_card(self, box):
+        if box.canvas is None:
+            return
+
+        is_card_candidate = (
+            box.orientation == "horizontal"
+            and box.size_hint_y is None
+            and dp(48) <= box.height <= dp(240)
+            and len(getattr(box, "children", [])) >= 2
+        )
+        if not is_card_candidate:
+            return
+
+        box._pro_ui_applied = True
+        box.padding = dp(10)
+        box.spacing = max(box.spacing, dp(8))
+
+        with box.canvas.before:
+            Color(*COLOR_CARD)
+            box._pro_ui_bg = RoundedRectangle(pos=box.pos, size=box.size, radius=[dp(12)])
+
+        def _update_bg(*_):
+            if hasattr(box, "_pro_ui_bg"):
+                box._pro_ui_bg.pos = box.pos
+                box._pro_ui_bg.size = box.size
+
+        box.bind(pos=_update_bg, size=_update_bg)
+        _update_bg()
+
+
 class FutureApp(App):
     def build(self):
         Window.clearcolor = COLOR_BG
@@ -408,6 +514,9 @@ class FutureApp(App):
             self.log(f"fatal add_screens error: {crash_text}")
             self.write_crash_report(crash_text, "add_screens")
             self._build_fallback_home()
+
+        self._pro_ui_styler = ProUIStyler()
+        Clock.schedule_once(lambda dt: self._pro_ui_styler.start(self.sm), 0.2)
         return self.sm
 
     def _documents_dir(self):
