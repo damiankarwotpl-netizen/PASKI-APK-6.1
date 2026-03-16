@@ -2199,6 +2199,38 @@ class FutureApp(App):
             t = t.replace(a, b)
         return " ".join(t.replace("_", " ").replace("-", " ").split())
 
+    def _clean_excel_number_text(self, value):
+        s = "" if value is None else str(value).strip()
+        if s.endswith('.0'):
+            core = s[:-2]
+            if core.replace('-', '').isdigit():
+                s = core
+        return s
+
+    def _normalize_phone(self, value):
+        s = self._clean_excel_number_text(value)
+        s = s.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+        if not s:
+            return ""
+        if s.startswith('00'):
+            s = '+' + s[2:]
+        if s.startswith('+'):
+            digits = ''.join(ch for ch in s[1:] if ch.isdigit())
+            return f'+{digits}' if digits else ''
+        digits = ''.join(ch for ch in s if ch.isdigit())
+        return f'+{digits}' if digits else ''
+
+    def _normalize_pesel(self, value):
+        s = self._clean_excel_number_text(value)
+        digits = ''.join(ch for ch in s if ch.isdigit())
+        if not digits:
+            return ""
+        if len(digits) < 11:
+            digits = digits.zfill(11)
+        elif len(digits) > 11:
+            digits = digits[-11:]
+        return digits
+
     def _find_header_row_and_map(self, rows):
         aliases = {
             'name': ['imie', 'imi', 'name', 'first name'],
@@ -2206,7 +2238,7 @@ class FutureApp(App):
             'email': ['email', 'e mail', 'mail'],
             'pesel': ['pesel'],
             'phone': ['telefon', 'tel', 'phone', 'kom'],
-            'plant': ['zaklad', 'zaklad pracy', 'plant', 'oddzial', 'dzial'],
+            'plant': ['zaklad', 'zaklad pracy', 'plant', 'oddzial', 'dzial', 'pracownicy'],
             'apartment': ['adres', 'mieszkanie', 'apart', 'lokal'],
             'notes': ['notat', 'uwag', 'opis', 'notes'],
             'shirt': ['koszul', 'shirt', 'tshirt', 't shirt'],
@@ -2246,7 +2278,7 @@ class FutureApp(App):
 
             score = sum(1 for v in mapping.values() if v != -1)
             if mapping['name'] != -1 and mapping['surname'] != -1:
-                score += 4
+                score += 6
             if mapping['registration'] != -1:
                 score += 2
             if score > best_score:
@@ -2254,6 +2286,8 @@ class FutureApp(App):
                 best_idx = ridx
                 best_map = mapping
 
+        if best_score < 2:
+            return -1, {}
         return best_idx, best_map
 
     def process_book(self, path):
@@ -2272,7 +2306,14 @@ class FutureApp(App):
             imported_sizes = 0
             imported_cars = 0
             imported_plants = 0
+            skipped_only_name_surname = 0
             touched_sheets = 0
+
+            people = {}
+
+            def merge_field(dst, key, val):
+                if val and (not dst.get(key) or len(val) > len(dst.get(key, ''))):
+                    dst[key] = val
 
             for ws in wb.worksheets:
                 raw = list(ws.iter_rows(values_only=True))
@@ -2291,72 +2332,56 @@ class FutureApp(App):
 
                 for r in raw[h_idx + 1:]:
                     try:
-                        n = self._cell_str(r, m.get('name', -1))
-                        sname = self._cell_str(r, m.get('surname', -1))
-                        plant = self._cell_str(r, m.get('plant', -1))
+                        n = self._clean_excel_number_text(self._cell_str(r, m.get('name', -1)))
+                        sname = self._clean_excel_number_text(self._cell_str(r, m.get('surname', -1)))
+                        plant = self._clean_excel_number_text(self._cell_str(r, m.get('plant', -1)))
 
-                        # kontakty + pracownicy
                         if has_name_surname and n and sname:
-                            email = self._cell_str(r, m.get('email', -1))
-                            pesel = self._cell_str(r, m.get('pesel', -1))
-                            phone = self._cell_str(r, m.get('phone', -1))
-                            apartment = self._cell_str(r, m.get('apartment', -1))
-                            notes = self._cell_str(r, m.get('notes', -1))
+                            email = self._clean_excel_number_text(self._cell_str(r, m.get('email', -1))).lower()
+                            pesel = self._normalize_pesel(self._cell_str(r, m.get('pesel', -1)))
+                            phone = self._normalize_phone(self._cell_str(r, m.get('phone', -1)))
+                            apartment = self._clean_excel_number_text(self._cell_str(r, m.get('apartment', -1)))
+                            notes = self._clean_excel_number_text(self._cell_str(r, m.get('notes', -1)))
+                            shirt = self._clean_excel_number_text(self._cell_str(r, m.get('shirt', -1))) if has_sizes else ""
+                            hoodie = self._clean_excel_number_text(self._cell_str(r, m.get('hoodie', -1))) if has_sizes else ""
+                            pants = self._clean_excel_number_text(self._cell_str(r, m.get('pants', -1))) if has_sizes else ""
+                            jacket = self._clean_excel_number_text(self._cell_str(r, m.get('jacket', -1))) if has_sizes else ""
+                            shoes = self._clean_excel_number_text(self._cell_str(r, m.get('shoes', -1))) if has_sizes else ""
 
-                            self.conn.execute(
-                                "INSERT OR REPLACE INTO contacts (name,surname,email,pesel,phone,workplace,apartment,notes) VALUES (?,?,?,?,?,?,?,?)",
-                                (n.lower(), sname.lower(), email, pesel, phone, plant, apartment, notes)
-                            )
-                            imported_contacts += 1
+                            only_name_surname = not any([email, pesel, phone, plant, apartment, notes, shirt, hoodie, pants, jacket, shoes])
+                            if only_name_surname:
+                                skipped_only_name_surname += 1
+                                continue
 
-                            wr = self.conn.execute(
-                                "SELECT id FROM workers WHERE lower(name)=lower(?) AND lower(surname)=lower(?) LIMIT 1",
-                                (n, sname)
-                            ).fetchone()
-                            if wr:
-                                self.conn.execute(
-                                    "UPDATE workers SET plant=?, phone=? WHERE id=?",
-                                    (plant, phone, wr[0])
-                                )
-                            else:
-                                self.conn.execute(
-                                    "INSERT INTO workers(name, surname, plant, phone, position, hire_date) VALUES(?,?,?,?,?,?)",
-                                    (n, sname, plant, phone, "", "")
-                                )
-                            imported_workers += 1
+                            key = (n.strip().lower(), sname.strip().lower())
+                            p = people.get(key)
+                            if not p:
+                                p = {
+                                    'name': n.strip(), 'surname': sname.strip(), 'email': '', 'pesel': '', 'phone': '',
+                                    'plant': '', 'apartment': '', 'notes': '',
+                                    'shirt': '', 'hoodie': '', 'pants': '', 'jacket': '', 'shoes': ''
+                                }
+                                people[key] = p
 
-                            if has_sizes:
-                                shirt = self._cell_str(r, m.get('shirt', -1))
-                                hoodie = self._cell_str(r, m.get('hoodie', -1))
-                                pants = self._cell_str(r, m.get('pants', -1))
-                                jacket = self._cell_str(r, m.get('jacket', -1))
-                                shoes = self._cell_str(r, m.get('shoes', -1))
+                            merge_field(p, 'email', email)
+                            merge_field(p, 'pesel', pesel)
+                            merge_field(p, 'phone', phone)
+                            merge_field(p, 'plant', plant)
+                            merge_field(p, 'apartment', apartment)
+                            merge_field(p, 'notes', notes)
+                            merge_field(p, 'shirt', shirt)
+                            merge_field(p, 'hoodie', hoodie)
+                            merge_field(p, 'pants', pants)
+                            merge_field(p, 'jacket', jacket)
+                            merge_field(p, 'shoes', shoes)
 
-                                if any([shirt, hoodie, pants, jacket, shoes]):
-                                    sz = self.conn.execute(
-                                        "SELECT id FROM clothes_sizes WHERE lower(name)=lower(?) AND lower(surname)=lower(?) LIMIT 1",
-                                        (n, sname)
-                                    ).fetchone()
-                                    if sz:
-                                        self.conn.execute(
-                                            "UPDATE clothes_sizes SET plant=?, shirt=?, hoodie=?, pants=?, jacket=?, shoes=? WHERE id=?",
-                                            (plant, shirt, hoodie, pants, jacket, shoes, sz[0])
-                                        )
-                                    else:
-                                        self.conn.execute(
-                                            "INSERT INTO clothes_sizes (name, surname, plant, shirt, hoodie, pants, jacket, shoes) VALUES (?,?,?,?,?,?,?,?)",
-                                            (n, sname, plant, shirt, hoodie, pants, jacket, shoes)
-                                        )
-                                    imported_sizes += 1
-
-                        # auta (moduł cars)
                         if has_car:
-                            reg = self._cell_str(r, m.get('registration', -1)).upper()
-                            car_name = self._cell_str(r, m.get('car_name', -1))
-                            driver = self._cell_str(r, m.get('driver', -1))
-                            mileage_raw = self._cell_str(r, m.get('mileage', -1))
-                            interval_raw = self._cell_str(r, m.get('service_interval', -1))
-                            last_service_raw = self._cell_str(r, m.get('last_service', -1))
+                            reg = self._clean_excel_number_text(self._cell_str(r, m.get('registration', -1))).upper()
+                            car_name = self._clean_excel_number_text(self._cell_str(r, m.get('car_name', -1)))
+                            driver = self._clean_excel_number_text(self._cell_str(r, m.get('driver', -1)))
+                            mileage_raw = self._clean_excel_number_text(self._cell_str(r, m.get('mileage', -1)))
+                            interval_raw = self._clean_excel_number_text(self._cell_str(r, m.get('service_interval', -1)))
+                            last_service_raw = self._clean_excel_number_text(self._cell_str(r, m.get('last_service', -1)))
 
                             if reg or car_name:
                                 if not car_name:
@@ -2393,12 +2418,11 @@ class FutureApp(App):
                                     )
                                 imported_cars += 1
 
-                        # zakłady
                         if has_plant and plant:
-                            city = self._cell_str(r, m.get('city', -1))
-                            address = self._cell_str(r, m.get('address', -1))
-                            plant_phone = self._cell_str(r, m.get('plant_phone', -1))
-                            notes = self._cell_str(r, m.get('notes', -1))
+                            city = self._clean_excel_number_text(self._cell_str(r, m.get('city', -1)))
+                            address = self._clean_excel_number_text(self._cell_str(r, m.get('address', -1)))
+                            plant_phone = self._normalize_phone(self._cell_str(r, m.get('plant_phone', -1)))
+                            notes = self._clean_excel_number_text(self._cell_str(r, m.get('notes', -1)))
 
                             self.conn.execute(
                                 "INSERT INTO plants(name, city, address, contact_phone, notes) VALUES(?,?,?,?,?) "
@@ -2408,6 +2432,46 @@ class FutureApp(App):
                             imported_plants += 1
                     except Exception:
                         self.log(f"process_book row import error [{ws.title}]: {traceback.format_exc()}")
+
+            for _, p in people.items():
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO contacts (name,surname,email,pesel,phone,workplace,apartment,notes) VALUES (?,?,?,?,?,?,?,?)",
+                    (p['name'].lower(), p['surname'].lower(), p['email'], p['pesel'], p['phone'], p['plant'], p['apartment'], p['notes'])
+                )
+                imported_contacts += 1
+
+                wr = self.conn.execute(
+                    "SELECT id FROM workers WHERE lower(name)=lower(?) AND lower(surname)=lower(?) LIMIT 1",
+                    (p['name'], p['surname'])
+                ).fetchone()
+                if wr:
+                    self.conn.execute(
+                        "UPDATE workers SET plant=?, phone=? WHERE id=?",
+                        (p['plant'], p['phone'], wr[0])
+                    )
+                else:
+                    self.conn.execute(
+                        "INSERT INTO workers(name, surname, plant, phone, position, hire_date) VALUES(?,?,?,?,?,?)",
+                        (p['name'], p['surname'], p['plant'], p['phone'], "", "")
+                    )
+                imported_workers += 1
+
+                if any([p['shirt'], p['hoodie'], p['pants'], p['jacket'], p['shoes']]):
+                    sz = self.conn.execute(
+                        "SELECT id FROM clothes_sizes WHERE lower(name)=lower(?) AND lower(surname)=lower(?) LIMIT 1",
+                        (p['name'], p['surname'])
+                    ).fetchone()
+                    if sz:
+                        self.conn.execute(
+                            "UPDATE clothes_sizes SET plant=?, shirt=?, hoodie=?, pants=?, jacket=?, shoes=? WHERE id=?",
+                            (p['plant'], p['shirt'], p['hoodie'], p['pants'], p['jacket'], p['shoes'], sz[0])
+                        )
+                    else:
+                        self.conn.execute(
+                            "INSERT INTO clothes_sizes (name, surname, plant, shirt, hoodie, pants, jacket, shoes) VALUES (?,?,?,?,?,?,?,?)",
+                            (p['name'], p['surname'], p['plant'], p['shirt'], p['hoodie'], p['pants'], p['jacket'], p['shoes'])
+                        )
+                    imported_sizes += 1
 
             if touched_sheets == 0:
                 self.msg("Błąd", "Nie wykryto nagłówków danych w żadnym arkuszu")
@@ -2419,10 +2483,10 @@ class FutureApp(App):
             self.update_stats()
             self.msg(
                 "OK",
-                f"Import zakończony (arkusze: {touched_sheets}).\nKontakty: {imported_contacts}\nPracownicy: {imported_workers}\nRozmiary: {imported_sizes}\nAuta: {imported_cars}\nZakłady: {imported_plants}"
+                f"Import zakończony (arkusze: {touched_sheets}).\nKontakty: {imported_contacts}\nPracownicy: {imported_workers}\nRozmiary: {imported_sizes}\nAuta: {imported_cars}\nZakłady: {imported_plants}\nPominięto (tylko imię+nazwisko): {skipped_only_name_surname}"
             )
             self.log(
-                f"Imported workbook(all sheets): {path} | sheets={touched_sheets} contacts={imported_contacts} workers={imported_workers} sizes={imported_sizes} cars={imported_cars} plants={imported_plants}"
+                f"Imported workbook(all sheets): {path} | sheets={touched_sheets} contacts={imported_contacts} workers={imported_workers} sizes={imported_sizes} cars={imported_cars} plants={imported_plants} skipped_only_name_surname={skipped_only_name_surname}"
             )
         except Exception as e:
             self.log(f"process_book error: {traceback.format_exc()}")
