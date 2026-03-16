@@ -649,7 +649,75 @@ class FutureApp(App):
             self.write_crash_report(crash_text, "add_screens")
             self._build_fallback_home()
 
+        self._setup_back_navigation()
         return self.sm
+
+    def _setup_back_navigation(self):
+        self._nav_history = []
+        self._restoring_nav = False
+        Window.bind(on_keyboard=self._on_global_keyboard)
+        self.sm.bind(current=lambda *_: self._push_nav_state())
+        self._push_nav_state()
+
+    def _bind_clothes_navigation(self):
+        if hasattr(self, 'clothes_sm') and not getattr(self, '_clothes_nav_bound', False):
+            self.clothes_sm.bind(current=lambda *_: self._push_nav_state())
+            self._clothes_nav_bound = True
+
+    def _current_nav_state(self):
+        main = self.sm.current if hasattr(self, 'sm') and self.sm else 'home'
+        sub = None
+        if main == 'clothes' and hasattr(self, 'clothes_sm') and self.clothes_sm:
+            sub = self.clothes_sm.current
+        return (main, sub)
+
+    def _push_nav_state(self, *_):
+        if getattr(self, '_restoring_nav', False):
+            return
+        state = self._current_nav_state()
+        hist = getattr(self, '_nav_history', None)
+        if hist is None:
+            self._nav_history = [state]
+            return
+        if not hist or hist[-1] != state:
+            hist.append(state)
+        if len(hist) > 150:
+            del hist[0:len(hist)-150]
+
+    def _apply_nav_state(self, state):
+        target_main, target_sub = state
+        if target_main not in getattr(self, 'sc_ref', {}):
+            target_main = 'home'
+        self.ensure_screen_ui(target_main)
+        self.sm.current = target_main
+        if target_main == 'clothes':
+            self._bind_clothes_navigation()
+            if target_sub and hasattr(self, 'clothes_sm') and self.clothes_sm.has_screen(target_sub):
+                self.clothes_sm.current = target_sub
+
+    def go_back(self):
+        hist = getattr(self, '_nav_history', [])
+        if len(hist) <= 1:
+            return False
+        self._restoring_nav = True
+        try:
+            hist.pop()
+            self._apply_nav_state(hist[-1])
+        finally:
+            self._restoring_nav = False
+        return True
+
+    def _on_global_keyboard(self, window, key, scancode, codepoint, modifiers):
+        if key in (27, 1001):
+            if self.go_back():
+                return True
+            if getattr(self, 'sm', None) and self.sm.current != 'home':
+                self.ensure_screen_ui('home')
+                self.sm.current = 'home'
+                self._push_nav_state()
+                return True
+            return False
+        return False
 
     def switch_theme(self, mode):
         if mode not in ("dark", "light"):
@@ -1500,8 +1568,11 @@ class FutureApp(App):
         self.clothes_sm.add_widget(ClothesOrdersScreen(name='orders'))
         self.clothes_sm.add_widget(ClothesReportsScreen(name='reports'))
         self.clothes_sm.current = 'sizes'
+        self._clothes_nav_bound = False
+        self._bind_clothes_navigation()
         container.add_widget(self.clothes_sm)
         self.sc_ref["clothes"].add_widget(container)
+        self._push_nav_state()
         try:
             scr = self.clothes_sm.get_screen('sizes')
             if hasattr(scr, 'build_ui'):
