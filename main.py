@@ -2310,10 +2310,21 @@ class FutureApp(App):
             touched_sheets = 0
 
             people = {}
+            cars_map = {}
+            plants_map = {}
 
             def merge_field(dst, key, val):
                 if val and (not dst.get(key) or len(val) > len(dst.get(key, ''))):
                     dst[key] = val
+
+            def to_int(v, default=0):
+                try:
+                    s = str(v).replace(' ', '').replace(',', '.').strip()
+                    if not s:
+                        return default
+                    return int(float(s))
+                except Exception:
+                    return default
 
             for ws in wb.worksheets:
                 raw = list(ws.iter_rows(values_only=True))
@@ -2388,94 +2399,119 @@ class FutureApp(App):
                                     car_name = reg or "Auto"
                                 if not reg:
                                     reg = car_name.upper()
-
-                                def to_int(v, default=0):
-                                    try:
-                                        s = str(v).replace(' ', '').replace(',', '.').strip()
-                                        if not s:
-                                            return default
-                                        return int(float(s))
-                                    except Exception:
-                                        return default
-
-                                mileage = max(0, to_int(mileage_raw, 0))
-                                interval = max(1, to_int(interval_raw, 15000))
-                                last_service = max(0, to_int(last_service_raw, 0))
-
-                                ex = self.conn.execute(
-                                    "SELECT id FROM cars WHERE upper(registration)=upper(?) LIMIT 1",
-                                    (reg,)
-                                ).fetchone()
-                                if ex:
-                                    self.conn.execute(
-                                        "UPDATE cars SET name=?, driver=?, mileage=?, service_interval=?, last_service=? WHERE id=?",
-                                        (car_name, driver, mileage, interval, last_service, ex[0])
-                                    )
-                                else:
-                                    self.conn.execute(
-                                        "INSERT INTO cars(name, registration, driver, mileage, service_interval, last_service) VALUES(?,?,?,?,?,?)",
-                                        (car_name, reg, driver, mileage, interval, last_service)
-                                    )
-                                imported_cars += 1
+                                cars_map[reg] = (
+                                    car_name,
+                                    driver,
+                                    max(0, to_int(mileage_raw, 0)),
+                                    max(1, to_int(interval_raw, 15000)),
+                                    max(0, to_int(last_service_raw, 0))
+                                )
 
                         if has_plant and plant:
                             city = self._clean_excel_number_text(self._cell_str(r, m.get('city', -1)))
                             address = self._clean_excel_number_text(self._cell_str(r, m.get('address', -1)))
                             plant_phone = self._normalize_phone(self._cell_str(r, m.get('plant_phone', -1)))
                             notes = self._clean_excel_number_text(self._cell_str(r, m.get('notes', -1)))
-
-                            self.conn.execute(
-                                "INSERT INTO plants(name, city, address, contact_phone, notes) VALUES(?,?,?,?,?) "
-                                "ON CONFLICT(name) DO UPDATE SET city=excluded.city, address=excluded.address, contact_phone=excluded.contact_phone, notes=excluded.notes",
-                                (plant, city, address, plant_phone, notes)
-                            )
-                            imported_plants += 1
+                            plants_map[plant] = (city, address, plant_phone, notes)
                     except Exception:
                         self.log(f"process_book row import error [{ws.title}]: {traceback.format_exc()}")
-
-            for _, p in people.items():
-                self.conn.execute(
-                    "INSERT OR REPLACE INTO contacts (name,surname,email,pesel,phone,workplace,apartment,notes) VALUES (?,?,?,?,?,?,?,?)",
-                    (p['name'].lower(), p['surname'].lower(), p['email'], p['pesel'], p['phone'], p['plant'], p['apartment'], p['notes'])
-                )
-                imported_contacts += 1
-
-                wr = self.conn.execute(
-                    "SELECT id FROM workers WHERE lower(name)=lower(?) AND lower(surname)=lower(?) LIMIT 1",
-                    (p['name'], p['surname'])
-                ).fetchone()
-                if wr:
-                    self.conn.execute(
-                        "UPDATE workers SET plant=?, phone=? WHERE id=?",
-                        (p['plant'], p['phone'], wr[0])
-                    )
-                else:
-                    self.conn.execute(
-                        "INSERT INTO workers(name, surname, plant, phone, position, hire_date) VALUES(?,?,?,?,?,?)",
-                        (p['name'], p['surname'], p['plant'], p['phone'], "", "")
-                    )
-                imported_workers += 1
-
-                if any([p['shirt'], p['hoodie'], p['pants'], p['jacket'], p['shoes']]):
-                    sz = self.conn.execute(
-                        "SELECT id FROM clothes_sizes WHERE lower(name)=lower(?) AND lower(surname)=lower(?) LIMIT 1",
-                        (p['name'], p['surname'])
-                    ).fetchone()
-                    if sz:
-                        self.conn.execute(
-                            "UPDATE clothes_sizes SET plant=?, shirt=?, hoodie=?, pants=?, jacket=?, shoes=? WHERE id=?",
-                            (p['plant'], p['shirt'], p['hoodie'], p['pants'], p['jacket'], p['shoes'], sz[0])
-                        )
-                    else:
-                        self.conn.execute(
-                            "INSERT INTO clothes_sizes (name, surname, plant, shirt, hoodie, pants, jacket, shoes) VALUES (?,?,?,?,?,?,?,?)",
-                            (p['name'], p['surname'], p['plant'], p['shirt'], p['hoodie'], p['pants'], p['jacket'], p['shoes'])
-                        )
-                    imported_sizes += 1
 
             if touched_sheets == 0:
                 self.msg("Błąd", "Nie wykryto nagłówków danych w żadnym arkuszu")
                 return
+
+            existing_workers = {
+                (str(n).strip().lower(), str(s).strip().lower()): wid
+                for wid, n, s in self.conn.execute("SELECT id, name, surname FROM workers").fetchall()
+            }
+            existing_sizes = {
+                (str(n).strip().lower(), str(s).strip().lower()): sid
+                for sid, n, s in self.conn.execute("SELECT id, name, surname FROM clothes_sizes").fetchall()
+            }
+            existing_cars = {
+                str(reg or '').strip().upper(): cid
+                for cid, reg in self.conn.execute("SELECT id, registration FROM cars").fetchall()
+                if str(reg or '').strip()
+            }
+
+            contacts_rows = []
+            worker_updates = []
+            worker_inserts = []
+            size_updates = []
+            size_inserts = []
+
+            for p in people.values():
+                key = (p['name'].lower(), p['surname'].lower())
+                contacts_rows.append((p['name'].lower(), p['surname'].lower(), p['email'], p['pesel'], p['phone'], p['plant'], p['apartment'], p['notes']))
+
+                wid = existing_workers.get(key)
+                if wid:
+                    worker_updates.append((p['plant'], p['phone'], wid))
+                else:
+                    worker_inserts.append((p['name'], p['surname'], p['plant'], p['phone'], "", ""))
+
+                if any([p['shirt'], p['hoodie'], p['pants'], p['jacket'], p['shoes']]):
+                    sid = existing_sizes.get(key)
+                    if sid:
+                        size_updates.append((p['plant'], p['shirt'], p['hoodie'], p['pants'], p['jacket'], p['shoes'], sid))
+                    else:
+                        size_inserts.append((p['name'], p['surname'], p['plant'], p['shirt'], p['hoodie'], p['pants'], p['jacket'], p['shoes']))
+
+            if contacts_rows:
+                self.conn.executemany(
+                    "INSERT OR REPLACE INTO contacts (name,surname,email,pesel,phone,workplace,apartment,notes) VALUES (?,?,?,?,?,?,?,?)",
+                    contacts_rows
+                )
+            if worker_updates:
+                self.conn.executemany("UPDATE workers SET plant=?, phone=? WHERE id=?", worker_updates)
+            if worker_inserts:
+                self.conn.executemany(
+                    "INSERT INTO workers(name, surname, plant, phone, position, hire_date) VALUES(?,?,?,?,?,?)",
+                    worker_inserts
+                )
+            if size_updates:
+                self.conn.executemany(
+                    "UPDATE clothes_sizes SET plant=?, shirt=?, hoodie=?, pants=?, jacket=?, shoes=? WHERE id=?",
+                    size_updates
+                )
+            if size_inserts:
+                self.conn.executemany(
+                    "INSERT INTO clothes_sizes (name, surname, plant, shirt, hoodie, pants, jacket, shoes) VALUES (?,?,?,?,?,?,?,?)",
+                    size_inserts
+                )
+
+            car_updates = []
+            car_inserts = []
+            for reg, vals in cars_map.items():
+                cid = existing_cars.get(reg)
+                if cid:
+                    car_updates.append((vals[0], vals[1], vals[2], vals[3], vals[4], cid))
+                else:
+                    car_inserts.append((vals[0], reg, vals[1], vals[2], vals[3], vals[4]))
+
+            if car_updates:
+                self.conn.executemany(
+                    "UPDATE cars SET name=?, driver=?, mileage=?, service_interval=?, last_service=? WHERE id=?",
+                    car_updates
+                )
+            if car_inserts:
+                self.conn.executemany(
+                    "INSERT INTO cars(name, registration, driver, mileage, service_interval, last_service) VALUES(?,?,?,?,?,?)",
+                    car_inserts
+                )
+
+            if plants_map:
+                self.conn.executemany(
+                    "INSERT INTO plants(name, city, address, contact_phone, notes) VALUES(?,?,?,?,?) "
+                    "ON CONFLICT(name) DO UPDATE SET city=excluded.city, address=excluded.address, contact_phone=excluded.contact_phone, notes=excluded.notes",
+                    [(name, vals[0], vals[1], vals[2], vals[3]) for name, vals in plants_map.items()]
+                )
+
+            imported_contacts = len(contacts_rows)
+            imported_workers = len(worker_updates) + len(worker_inserts)
+            imported_sizes = len(size_updates) + len(size_inserts)
+            imported_cars = len(car_updates) + len(car_inserts)
+            imported_plants = len(plants_map)
 
             self.conn.commit()
             self.sync_all_contact_links()
