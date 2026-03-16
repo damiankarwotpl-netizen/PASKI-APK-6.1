@@ -31,6 +31,7 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.checkbox import CheckBox
 from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
 from kivy.uix.progressbar import ProgressBar
+from kivy.animation import Animation
 from kivy.graphics import Color, Rectangle, RoundedRectangle, Line
 
 try:
@@ -3181,6 +3182,173 @@ class FutureApp(App):
         except Exception:
             self.log(f"show_logs error: {traceback.format_exc()}")
             self.msg("Błąd", "Nie można otworzyć logów")
+
+# =====================================================
+# PROFESSIONAL MOBILE UI PATCH
+# wkleić na sam koniec main.py
+# =====================================================
+
+from kivy.clock import Clock
+from kivy.metrics import dp
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
+from kivy.uix.label import Label
+from kivy.graphics import Color, RoundedRectangle
+
+
+# ----------------------------
+# karta wiersza zamówienia
+# ----------------------------
+
+def make_card(widget):
+
+    if getattr(widget, "_card_applied", False):
+        return
+
+    widget._card_applied = True
+
+    with widget.canvas.before:
+        Color(0.12,0.12,0.12,1)
+        widget.bg = RoundedRectangle(radius=[dp(12)])
+
+    def update_bg(*_):
+        widget.bg.pos = widget.pos
+        widget.bg.size = widget.size
+
+    widget.bind(pos=update_bg, size=update_bg)
+
+    widget.padding = dp(10)
+    widget.spacing = dp(8)
+    widget.size_hint_y = None
+    widget.height = max(widget.height, dp(64))
+
+
+# ----------------------------
+# przyciski mobilne
+# ----------------------------
+
+def fix_button(btn):
+
+    btn.size_hint_x = None
+    btn.height = dp(48)
+
+    if btn.width < dp(140):
+        btn.width = dp(140)
+
+    btn.padding = (dp(14), dp(8))
+    btn.halign = "center"
+    btn.valign = "middle"
+
+    if hasattr(btn, "text_size"):
+        btn.text_size = (btn.width - dp(20), None)
+
+
+# ----------------------------
+# poziomy scroll przycisków
+# ----------------------------
+
+def make_scroll_buttons(layout):
+
+    buttons = [w for w in layout.children if isinstance(w, Button)]
+
+    if len(buttons) < 3:
+        return
+
+    parent = layout.parent
+    if not parent:
+        return
+
+    parent.remove_widget(layout)
+
+    scroll = ScrollView(
+        size_hint_y=None,
+        height=dp(60),
+        do_scroll_y=False
+    )
+
+    row = BoxLayout(
+        orientation="horizontal",
+        size_hint_x=None,
+        height=dp(60),
+        spacing=dp(8),
+        padding=[dp(6), dp(6)]
+    )
+
+    row.bind(minimum_width=row.setter("width"))
+
+    for b in reversed(buttons):
+        fix_button(b)
+        row.add_widget(b)
+
+    scroll.add_widget(row)
+    parent.add_widget(scroll)
+
+
+# ----------------------------
+# naprawa labeli
+# ----------------------------
+
+def fix_label(lbl):
+
+    lbl.text_size = (lbl.width - dp(10), None)
+    lbl.valign = "middle"
+
+
+# ----------------------------
+# skan całego UI
+# ----------------------------
+
+def scan_ui(widget):
+
+    try:
+
+        if isinstance(widget, Button):
+            fix_button(widget)
+
+        if isinstance(widget, Label):
+            fix_label(widget)
+
+        if isinstance(widget, BoxLayout):
+
+            btn_count = sum(isinstance(x, Button) for x in widget.children)
+
+            if btn_count >= 4 and widget.height <= dp(70):
+                make_scroll_buttons(widget)
+
+            if widget.size_hint_y is None and widget.height < dp(60):
+                make_card(widget)
+
+    except:
+        pass
+
+    for c in getattr(widget, "children", []):
+        scan_ui(c)
+
+
+# ----------------------------
+# instalacja patcha
+# ----------------------------
+
+def apply_pro_ui(dt):
+
+    from kivy.app import App
+
+    app = App.get_running_app()
+
+    if not app:
+        return
+
+    root = app.root
+
+    if not root:
+        return
+
+    scan_ui(root)
+
+
+Clock.schedule_once(apply_pro_ui, 1.2)
 
 if __name__ == "__main__":
     FutureApp().run()
