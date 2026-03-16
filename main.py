@@ -92,7 +92,8 @@ class ModernButton(Button):
             state_handler = self._fallback_update_state
         self.halign = 'center'
         self.valign = 'middle'
-        self.shorten = False
+        self.shorten = True
+        self.max_lines = 1
         self.bind(pos=self._update, size=self._update, state=state_handler)
         state_handler()
         self._update()
@@ -100,7 +101,7 @@ class ModernButton(Button):
     def _update(self, *args):
         self.rect.pos, self.rect.size = self.pos, self.size
         self.border_line.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(12))
-        self.text_size = (max(dp(10), self.width - dp(12)), max(dp(10), self.height - dp(8)))
+        self.text_size = (max(dp(10), self.width - dp(12)), None)
 
     def _fallback_update_state(self, *args):
         factor = 0.82 if self.state == 'down' else 1.0
