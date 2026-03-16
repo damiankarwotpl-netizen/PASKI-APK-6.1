@@ -505,7 +505,7 @@ class ClothesReportsScreen(Screen):
 
 
 class ProUIStyler:
-    """Lekki styler UI: poprawia wygląd globalnie bez zmiany logiki."""
+    """Globalny styler: ujednolica UI całej aplikacji bez zmiany logiki."""
 
     def __init__(self):
         self._scan_event = None
@@ -516,7 +516,8 @@ class ProUIStyler:
         self.apply(root_widget)
         if self._scan_event is not None:
             self._scan_event.cancel()
-        self._scan_event = Clock.schedule_interval(lambda dt: self.apply(root_widget), 1.5)
+        # regularny rescan dla dynamicznie tworzonych widgetów
+        self._scan_event = Clock.schedule_interval(lambda dt: self.apply(root_widget), 0.9)
 
     def apply(self, widget):
         try:
@@ -527,9 +528,6 @@ class ProUIStyler:
             self.apply(child)
 
     def _style_widget(self, widget):
-        if getattr(widget, "_pro_ui_applied", False):
-            return
-
         if isinstance(widget, Label):
             self._style_label(widget)
             return
@@ -543,70 +541,124 @@ class ProUIStyler:
             return
 
         if isinstance(widget, BoxLayout):
-            self._style_card(widget)
+            self._style_boxlayout(widget)
+            return
+
+        if isinstance(widget, GridLayout):
+            self._style_grid(widget)
+            return
+
+        if isinstance(widget, ScrollView):
+            self._style_scroll(widget)
+            return
+
+        if isinstance(widget, Popup):
+            self._style_popup(widget)
 
     def _style_label(self, lbl):
-        lbl._pro_ui_applied = True
-        if getattr(lbl, "halign", "") in ("", None):
-            lbl.halign = "left"
-        lbl.valign = "middle"
+        if not getattr(lbl, '_pro_label_applied', False):
+            lbl._pro_label_applied = True
+            if getattr(lbl, 'halign', '') in ('', None):
+                lbl.halign = 'left'
+            lbl.valign = 'middle'
 
-        def _update_text_size(*_):
-            lbl.text_size = (max(dp(30), lbl.width - dp(8)), None)
+            def _update_text_size(*_):
+                lbl.text_size = (max(dp(30), lbl.width - dp(8)), None)
 
-        lbl.bind(size=_update_text_size)
-        _update_text_size()
+            lbl.bind(size=_update_text_size)
+            _update_text_size()
+
+        # drobne odświeżanie czytelności
+        try:
+            if hasattr(lbl, 'font_size') and float(lbl.font_size) < float(dp(12)):
+                lbl.font_size = dp(12)
+        except Exception:
+            pass
 
     def _style_button(self, btn):
-        btn._pro_ui_applied = True
-        btn.height = max(btn.height, dp(46))
-        btn.padding = (dp(14), dp(10))
-        btn.halign = "center"
-        btn.valign = "middle"
+        if not getattr(btn, '_pro_btn_applied', False):
+            btn._pro_btn_applied = True
+            btn.height = max(btn.height, dp(48))
+            btn.padding = (dp(14), dp(10))
+            btn.halign = 'center'
+            btn.valign = 'middle'
+
+            def _update_btn_text(*_):
+                btn.text_size = (max(dp(60), btn.width - dp(18)), None)
+
+            if hasattr(btn, 'text_size'):
+                btn.bind(size=_update_btn_text)
+                _update_btn_text()
 
         if btn.size_hint_x is None:
             btn.width = max(btn.width, dp(132))
 
-        def _update_btn_text(*_):
-            btn.text_size = (max(dp(60), btn.width - dp(16)), None)
-
-        if hasattr(btn, "text_size"):
-            btn.bind(size=_update_btn_text)
-            _update_btn_text()
-
     def _style_input(self, ti):
-        ti._pro_ui_applied = True
+        if getattr(ti, '_pro_input_applied', False):
+            return
+        ti._pro_input_applied = True
         ti.padding = [dp(12), dp(12)]
         ti.cursor_width = max(1, int(dp(2)))
+        try:
+            if float(ti.font_size) < float(dp(14)):
+                ti.font_size = dp(14)
+        except Exception:
+            pass
 
-    def _style_card(self, box):
-        if box.canvas is None:
-            return
+    def _style_boxlayout(self, box):
+        # globalna poprawa spacing/padding
+        if not getattr(box, '_pro_box_spacing', False):
+            box._pro_box_spacing = True
+            try:
+                box.spacing = max(float(box.spacing), float(dp(8)))
+            except Exception:
+                pass
 
+        # karty dla list i wierszy rekordów
         is_card_candidate = (
-            box.orientation == "horizontal"
-            and box.size_hint_y is None
-            and dp(48) <= box.height <= dp(240)
-            and len(getattr(box, "children", [])) >= 2
+            box.size_hint_y is None
+            and dp(52) <= box.height <= dp(260)
+            and len(getattr(box, 'children', [])) >= 2
+            and not getattr(box, '_pro_ui_bg', None)
         )
-        if not is_card_candidate:
+        if is_card_candidate and box.canvas is not None:
+            with box.canvas.before:
+                Color(*COLOR_CARD)
+                box._pro_ui_bg = RoundedRectangle(pos=box.pos, size=box.size, radius=[dp(12)])
+
+            def _update_bg(*_):
+                if hasattr(box, '_pro_ui_bg'):
+                    box._pro_ui_bg.pos = box.pos
+                    box._pro_ui_bg.size = box.size
+
+            box.bind(pos=_update_bg, size=_update_bg)
+            _update_bg()
+
+    def _style_grid(self, grid):
+        if getattr(grid, '_pro_grid_applied', False):
             return
+        grid._pro_grid_applied = True
+        try:
+            grid.spacing = max(float(grid.spacing), float(dp(8)))
+        except Exception:
+            pass
 
-        box._pro_ui_applied = True
-        box.padding = dp(10)
-        box.spacing = max(box.spacing, dp(8))
+    def _style_scroll(self, sv):
+        if getattr(sv, '_pro_scroll_applied', False):
+            return
+        sv._pro_scroll_applied = True
+        try:
+            sv.bar_width = max(float(getattr(sv, 'bar_width', dp(6))), float(dp(6)))
+        except Exception:
+            pass
 
-        with box.canvas.before:
-            Color(*COLOR_CARD)
-            box._pro_ui_bg = RoundedRectangle(pos=box.pos, size=box.size, radius=[dp(12)])
-
-        def _update_bg(*_):
-            if hasattr(box, "_pro_ui_bg"):
-                box._pro_ui_bg.pos = box.pos
-                box._pro_ui_bg.size = box.size
-
-        box.bind(pos=_update_bg, size=_update_bg)
-        _update_bg()
+    def _style_popup(self, pop):
+        if getattr(pop, '_pro_popup_applied', False):
+            return
+        pop._pro_popup_applied = True
+        if hasattr(pop, 'size_hint') and pop.size_hint:
+            sx, sy = pop.size_hint
+            pop.size_hint = (max(0.90, sx or 0.9), max(0.55, sy or 0.55))
 
 
 class FutureApp(App):
@@ -650,6 +702,8 @@ class FutureApp(App):
             self._build_fallback_home()
 
         self._setup_back_navigation()
+        self._pro_ui_styler = ProUIStyler()
+        Clock.schedule_once(lambda dt: self._pro_ui_styler.start(self.sm), 0.15)
         return self.sm
 
     def _setup_back_navigation(self):
